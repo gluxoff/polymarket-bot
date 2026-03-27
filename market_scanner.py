@@ -92,11 +92,14 @@ class MarketScanner:
         logger.info(f"Сканирование завершено: {count} рынков обработано")
         return count
 
-    async def update_prices(self):
-        """Обновить цены для всех активных рынков"""
+    async def update_prices(self, max_markets: int = 500):
+        """Обновить цены для активных рынков (лимит max_markets)"""
         markets = await db.get_active_markets()
         if not markets:
             return
+
+        # Берём только первые max_markets (самые свежие — отсортированы по updated_at DESC)
+        markets = markets[:max_markets]
 
         # Собираем все token_id_yes для batch запроса
         token_ids = []

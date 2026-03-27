@@ -234,10 +234,17 @@ class PolymarketClient:
             logger.error(f"CLOB /book ошибка: {e}")
             return None
 
-    async def get_prices_batch(self, token_ids: list[str]) -> dict[str, float]:
-        tasks = [self._get_price_safe(tid) for tid in token_ids]
-        prices = await asyncio.gather(*tasks)
-        return {tid: p for tid, p in zip(token_ids, prices) if p is not None}
+    async def get_prices_batch(self, token_ids: list[str], batch_size: int = 20) -> dict[str, float]:
+        """Получить цены батчами по batch_size параллельных запросов"""
+        results = {}
+        for i in range(0, len(token_ids), batch_size):
+            batch = token_ids[i:i + batch_size]
+            tasks = [self._get_price_safe(tid) for tid in batch]
+            prices = await asyncio.gather(*tasks)
+            for tid, p in zip(batch, prices):
+                if p is not None:
+                    results[tid] = p
+        return results
 
     async def _get_price_safe(self, token_id: str) -> float | None:
         try:
