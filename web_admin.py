@@ -20,7 +20,7 @@ async def start_web_admin(application):
     app.router.add_get("/api/signals", api_get_signals)
     app.router.add_get("/api/trades", api_get_trades)
     app.router.add_get("/api/portfolio", api_get_portfolio)
-    app.router.add_post("/api/trading/toggle", api_toggle_trading)
+    app.router.add_get("/api/users", api_get_users)
     app.router.add_post("/api/trade/close/{trade_id}", api_close_trade)
     app.router.add_get("/health", health_check)
     app.router.add_get("/", index_page)
@@ -112,13 +112,19 @@ async def api_get_portfolio(request):
     return web.json_response({"portfolio": stats, "today": today})
 
 
-async def api_toggle_trading(request):
-    config.AUTO_TRADE_ENABLED = not config.AUTO_TRADE_ENABLED
-    # Сохраняем в JSON
-    settings = config.get_all_settings()
-    settings["auto_trade_enabled"] = config.AUTO_TRADE_ENABLED
-    config.save_settings(settings)
-    return web.json_response({"auto_trade_enabled": config.AUTO_TRADE_ENABLED})
+async def api_get_users(request):
+    users = await db.get_connected_users()
+    # Не отдаём секреты
+    safe = []
+    for u in users:
+        safe.append({
+            "id": u["id"],
+            "telegram_id": u["telegram_id"],
+            "username": u.get("username", ""),
+            "connected": bool(u.get("api_key")),
+            "created_at": u.get("created_at", ""),
+        })
+    return web.json_response(safe)
 
 
 async def api_close_trade(request):

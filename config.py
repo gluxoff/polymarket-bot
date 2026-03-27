@@ -75,9 +75,6 @@ GAMMA_API_URL = "https://gamma-api.polymarket.com"
 CLOB_API_URL = "https://clob.polymarket.com"
 POLYMARKET_CHAIN_ID = 137  # Polygon
 
-# Приватный ключ — ТОЛЬКО из .env, никогда из JSON!
-POLYMARKET_PRIVATE_KEY = os.getenv("POLYMARKET_PRIVATE_KEY", "")
-
 # Категории рынков
 CATEGORIES = _get_list(_js, "categories", "CATEGORIES", "politics,economics")
 
@@ -112,9 +109,6 @@ MAX_BET_SIZE_USDC = float(_get(_js, "max_bet_size_usdc", "MAX_BET_SIZE_USDC", 10
 MAX_DAILY_LOSS_USDC = float(_get(_js, "max_daily_loss_usdc", "MAX_DAILY_LOSS_USDC", 50.0))
 MAX_POSITIONS = int(_get(_js, "max_positions", "MAX_POSITIONS", 5))
 STOP_LOSS_PERCENT = float(_get(_js, "stop_loss_percent", "STOP_LOSS_PERCENT", 0.20))
-
-# Автоторговля
-AUTO_TRADE_ENABLED = _get(_js, "auto_trade_enabled", "AUTO_TRADE_ENABLED", False)
 
 # Расписание
 TIMEZONE = _get(_js, "timezone", "TIMEZONE", "Etc/GMT-3")
@@ -154,7 +148,6 @@ def get_all_settings() -> dict:
         "max_daily_loss_usdc": MAX_DAILY_LOSS_USDC,
         "max_positions": MAX_POSITIONS,
         "stop_loss_percent": STOP_LOSS_PERCENT,
-        "auto_trade_enabled": AUTO_TRADE_ENABLED,
         "timezone": TIMEZONE,
         "daily_summary_hour": DAILY_SUMMARY_HOUR,
         "web_admin_port": WEB_ADMIN_PORT,
@@ -167,7 +160,7 @@ def reload_dynamic():
     global CATEGORIES, SCAN_INTERVAL_MINUTES, DEEP_ANALYSIS_INTERVAL_MINUTES
     global PROBABILITY_SHIFT_THRESHOLD, VOLUME_SPIKE_MULTIPLIER
     global MAX_BET_SIZE_USDC, MAX_DAILY_LOSS_USDC, MAX_POSITIONS, STOP_LOSS_PERCENT
-    global AUTO_TRADE_ENABLED, DAILY_SUMMARY_HOUR
+    global DAILY_SUMMARY_HOUR
 
     js = _load_json_settings()
 
@@ -180,5 +173,4 @@ def reload_dynamic():
     MAX_DAILY_LOSS_USDC = float(_get(js, "max_daily_loss_usdc", "MAX_DAILY_LOSS_USDC", 50.0))
     MAX_POSITIONS = int(_get(js, "max_positions", "MAX_POSITIONS", 5))
     STOP_LOSS_PERCENT = float(_get(js, "stop_loss_percent", "STOP_LOSS_PERCENT", 0.20))
-    AUTO_TRADE_ENABLED = _get(js, "auto_trade_enabled", "AUTO_TRADE_ENABLED", False)
     DAILY_SUMMARY_HOUR = int(_get(js, "daily_summary_hour", "DAILY_SUMMARY_HOUR", 23))

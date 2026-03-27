@@ -1,4 +1,4 @@
-"""Async обёртка для Polymarket API (Gamma + CLOB)"""
+"""Async обёртка для Polymarket API (Gamma + CLOB) — multi-user"""
 
 import asyncio
 import time
@@ -35,73 +35,132 @@ class RateLimiter:
             self._tokens -= 1
 
 
-class PolymarketClient:
-    """Клиент для Polymarket Gamma API и CLOB API"""
+class UserClobClient:
+    """CLOB клиент для конкретного юзера (по API ключам)"""
 
-    def __init__(self):
-        self._http: aiohttp.ClientSession | None = None
-        self._clob_client = None  # py-clob-client (sync)
-        self._price_limiter = RateLimiter(max_tokens=100, refill_period=1.0)
-        self._order_limiter = RateLimiter(max_tokens=50, refill_period=1.0)
+    def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.api_passphrase = api_passphrase
+        self._client = None
 
-    async def init(self):
-        """Инициализация HTTP-сессии и CLOB клиента"""
-        self._http = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30),
-        )
+    async def init(self) -> bool:
+        """Инициализация CLOB клиента из L2 API ключей"""
+        try:
+            loop = asyncio.get_event_loop()
+            self._client = await loop.run_in_executor(None, self._init_sync)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка инициализации CLOB клиента: {e}")
+            return False
 
-        # Инициализация py-clob-client если есть приватный ключ
-        if config.POLYMARKET_PRIVATE_KEY:
-            try:
-                loop = asyncio.get_event_loop()
-                self._clob_client = await loop.run_in_executor(
-                    None, self._init_clob_client
-                )
-                logger.info("CLOB клиент инициализирован (торговля доступна)")
-            except Exception as e:
-                logger.warning(f"CLOB клиент не инициализирован: {e}")
-                logger.info("Бот будет работать в режиме только чтение")
-        else:
-            logger.info("POLYMARKET_PRIVATE_KEY не задан — режим только чтение")
-
-    def _init_clob_client(self):
-        """Инициализация py-clob-client (синхронно, вызывается в executor)"""
+    def _init_sync(self):
         from py_clob_client.client import ClobClient
+        from py_clob_client.clob_types import ApiCreds
 
         client = ClobClient(
             config.CLOB_API_URL,
-            key=config.POLYMARKET_PRIVATE_KEY,
             chain_id=config.POLYMARKET_CHAIN_ID,
         )
-        # Получение/создание L2 API credentials
-        client.set_api_creds(client.create_or_derive_api_creds())
+        creds = ApiCreds(
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            api_passphrase=self.api_passphrase,
+        )
+        client.set_api_creds(creds)
         return client
 
+    @property
+    def is_ready(self) -> bool:
+        return self._client is not None
+
+    async def place_order(self, token_id: str, side: str, size: float, price: float) -> dict | None:
+        if not self._client:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                partial(self._place_order_sync, token_id, side, size, price),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка ордера: {e}")
+            return None
+
+    def _place_order_sync(self, token_id: str, side: str, size: float, price: float) -> dict:
+        from py_clob_client.order_builder.constants import BUY, SELL
+        order_side = BUY if side.upper() == "BUY" else SELL
+        order = self._client.create_order(
+            token_id=token_id, price=price, size=size, side=order_side,
+        )
+        return self._client.post_order(order)
+
+    async def cancel_order(self, order_id: str) -> dict | None:
+        if not self._client:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, partial(self._client.cancel, order_id=order_id),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отмены ордера: {e}")
+            return None
+
+
+class PolymarketClient:
+    """Основной клиент — чтение рынков/цен (без авторизации)"""
+
+    def __init__(self):
+        self._http: aiohttp.ClientSession | None = None
+        self._price_limiter = RateLimiter(max_tokens=100, refill_period=1.0)
+        self._order_limiter = RateLimiter(max_tokens=50, refill_period=1.0)
+        # Кеш per-user CLOB клиентов: telegram_id -> UserClobClient
+        self._user_clients: dict[int, UserClobClient] = {}
+
+    async def init(self):
+        """Инициализация HTTP-сессии"""
+        self._http = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+        )
+        logger.info("Polymarket клиент инициализирован (режим чтения)")
+
     async def close(self):
-        """Закрыть HTTP-сессию"""
         if self._http and not self._http.closed:
             await self._http.close()
 
+    # ── Per-user CLOB клиенты ────────────────────────────────
+
+    async def get_user_client(self, telegram_id: int, api_key: str, api_secret: str, api_passphrase: str) -> UserClobClient | None:
+        """Получить или создать CLOB клиент для юзера"""
+        if telegram_id in self._user_clients:
+            client = self._user_clients[telegram_id]
+            if client.is_ready:
+                return client
+
+        client = UserClobClient(api_key, api_secret, api_passphrase)
+        ok = await client.init()
+        if ok:
+            self._user_clients[telegram_id] = client
+            logger.info(f"CLOB клиент создан для юзера {telegram_id}")
+            return client
+        return None
+
+    def remove_user_client(self, telegram_id: int):
+        """Удалить кеш CLOB клиента юзера"""
+        self._user_clients.pop(telegram_id, None)
+
     # ── Gamma API (чтение рынков, без авторизации) ─────────────
 
-    async def get_events(
-        self,
-        active: bool = True,
-        closed: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict]:
-        """Получить список событий с Gamma API"""
+    async def get_events(self, active: bool = True, closed: bool = False,
+                         limit: int = 100, offset: int = 0) -> list[dict]:
         params = {"limit": limit, "offset": offset}
         if active:
             params["active"] = "true"
         if not closed:
             params["closed"] = "false"
-
         try:
-            async with self._http.get(
-                f"{config.GAMMA_API_URL}/events", params=params
-            ) as resp:
+            async with self._http.get(f"{config.GAMMA_API_URL}/events", params=params) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 logger.error(f"Gamma /events: HTTP {resp.status}")
@@ -110,15 +169,10 @@ class PolymarketClient:
             logger.error(f"Gamma /events ошибка: {e}")
             return []
 
-    async def get_markets(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[dict]:
-        """Получить список рынков с Gamma API"""
+    async def get_markets(self, limit: int = 100, offset: int = 0) -> list[dict]:
         params = {"limit": limit, "offset": offset}
         try:
-            async with self._http.get(
-                f"{config.GAMMA_API_URL}/markets", params=params
-            ) as resp:
+            async with self._http.get(f"{config.GAMMA_API_URL}/markets", params=params) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 logger.error(f"Gamma /markets: HTTP {resp.status}")
@@ -128,11 +182,8 @@ class PolymarketClient:
             return []
 
     async def get_event_by_id(self, event_id: str) -> dict | None:
-        """Получить событие по ID"""
         try:
-            async with self._http.get(
-                f"{config.GAMMA_API_URL}/events/{event_id}"
-            ) as resp:
+            async with self._http.get(f"{config.GAMMA_API_URL}/events/{event_id}") as resp:
                 if resp.status == 200:
                     return await resp.json()
                 return None
@@ -143,12 +194,10 @@ class PolymarketClient:
     # ── CLOB API (чтение цен, без авторизации) ─────────────────
 
     async def get_price(self, token_id: str) -> float | None:
-        """Получить текущую цену (вероятность 0-1) для токена"""
         await self._price_limiter.acquire()
         try:
             async with self._http.get(
-                f"{config.CLOB_API_URL}/price",
-                params={"token_id": token_id},
+                f"{config.CLOB_API_URL}/price", params={"token_id": token_id},
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -159,12 +208,10 @@ class PolymarketClient:
             return None
 
     async def get_midpoint(self, token_id: str) -> float | None:
-        """Получить midpoint цену для токена"""
         await self._price_limiter.acquire()
         try:
             async with self._http.get(
-                f"{config.CLOB_API_URL}/midpoint",
-                params={"token_id": token_id},
+                f"{config.CLOB_API_URL}/midpoint", params={"token_id": token_id},
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -175,12 +222,10 @@ class PolymarketClient:
             return None
 
     async def get_order_book(self, token_id: str) -> dict | None:
-        """Получить книгу ордеров"""
         await self._price_limiter.acquire()
         try:
             async with self._http.get(
-                f"{config.CLOB_API_URL}/book",
-                params={"token_id": token_id},
+                f"{config.CLOB_API_URL}/book", params={"token_id": token_id},
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
@@ -190,102 +235,12 @@ class PolymarketClient:
             return None
 
     async def get_prices_batch(self, token_ids: list[str]) -> dict[str, float]:
-        """Получить цены для нескольких токенов параллельно"""
-        results = {}
-        tasks = []
-        for tid in token_ids:
-            tasks.append(self._get_price_safe(tid))
-
+        tasks = [self._get_price_safe(tid) for tid in token_ids]
         prices = await asyncio.gather(*tasks)
-        for tid, price in zip(token_ids, prices):
-            if price is not None:
-                results[tid] = price
-        return results
+        return {tid: p for tid, p in zip(token_ids, prices) if p is not None}
 
     async def _get_price_safe(self, token_id: str) -> float | None:
-        """Безопасное получение цены (не бросает исключений)"""
         try:
             return await self.get_price(token_id)
         except Exception:
             return None
-
-    # ── CLOB API (торговля, требует авторизации) ───────────────
-
-    @property
-    def can_trade(self) -> bool:
-        """Доступна ли торговля"""
-        return self._clob_client is not None
-
-    async def place_order(
-        self,
-        token_id: str,
-        side: str,
-        size: float,
-        price: float,
-    ) -> dict | None:
-        """Разместить ордер на CLOB. side='BUY' или 'SELL'"""
-        if not self._clob_client:
-            logger.error("Торговля недоступна — CLOB клиент не инициализирован")
-            return None
-
-        await self._order_limiter.acquire()
-        try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                partial(
-                    self._place_order_sync,
-                    token_id=token_id,
-                    side=side,
-                    size=size,
-                    price=price,
-                ),
-            )
-            logger.info(f"Ордер размещён: {side} {size} @ {price} (token={token_id[:16]}...)")
-            return result
-        except Exception as e:
-            logger.error(f"Ошибка размещения ордера: {e}")
-            return None
-
-    def _place_order_sync(self, token_id: str, side: str, size: float, price: float) -> dict:
-        """Синхронное размещение ордера через py-clob-client"""
-        from py_clob_client.order_builder.constants import BUY, SELL
-
-        order_side = BUY if side.upper() == "BUY" else SELL
-        order = self._clob_client.create_order(
-            token_id=token_id,
-            price=price,
-            size=size,
-            side=order_side,
-        )
-        return self._clob_client.post_order(order)
-
-    async def cancel_order(self, order_id: str) -> dict | None:
-        """Отменить ордер"""
-        if not self._clob_client:
-            return None
-
-        try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                partial(self._clob_client.cancel, order_id=order_id),
-            )
-            logger.info(f"Ордер отменён: {order_id}")
-            return result
-        except Exception as e:
-            logger.error(f"Ошибка отмены ордера {order_id}: {e}")
-            return None
-
-    async def get_open_orders(self) -> list[dict]:
-        """Получить открытые ордера пользователя"""
-        if not self._clob_client:
-            return []
-
-        try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._clob_client.get_orders)
-            return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.error(f"Ошибка получения ордеров: {e}")
-            return []

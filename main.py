@@ -38,17 +38,17 @@ async def post_init(application: Application):
     # БД
     await db.init_db()
 
-    # Polymarket клиент
+    # Polymarket клиент (чтение рынков/цен)
     client = PolymarketClient()
     await client.init()
 
-    # Publisher
+    # Publisher (канал для сигналов)
     publisher = TelegramPublisher(bot)
 
-    # Проверяем права бота
-    is_admin = await publisher.check_bot_is_admin()
-    if not is_admin:
-        logger.error(f"Бот НЕ является админом канала {config.TELEGRAM_CHANNEL_ID}!")
+    if config.TELEGRAM_CHANNEL_ID:
+        is_admin = await publisher.check_bot_is_admin()
+        if not is_admin:
+            logger.warning(f"Бот не админ канала {config.TELEGRAM_CHANNEL_ID} — сигналы не будут публиковаться")
 
     # Компоненты
     scanner = MarketScanner(client)
@@ -56,15 +56,7 @@ async def post_init(application: Application):
     signal_gen = SignalGenerator(analytics)
     chart_gen = ChartGenerator()
     risk_mgr = RiskManager()
-
-    # Автоторговля (если включена и есть ключ)
-    trader = None
-    if config.AUTO_TRADE_ENABLED and client.can_trade:
-        trader = AutoTrader(client, risk_mgr)
-        logger.info("Автоторговля включена")
-    else:
-        logger.info("Автоторговля выключена")
-
+    trader = AutoTrader(client, risk_mgr)
     portfolio = PortfolioTracker(client)
 
     # Планировщик
@@ -79,7 +71,7 @@ async def post_init(application: Application):
     )
 
     # Привязываем компоненты к командам
-    telegram_commands.set_components(publisher, scheduler, scanner, trader, chart_gen)
+    telegram_commands.set_components(publisher, scheduler, scanner, client, chart_gen)
 
     # Запуск планировщика
     scheduler.start()
@@ -98,18 +90,19 @@ async def post_init(application: Application):
         await start_web_admin(application)
         logger.info(f"Web Admin: http://0.0.0.0:{config.WEB_ADMIN_PORT}")
 
-    # Первое сканирование при запуске
+    # Первое сканирование
     logger.info("Первое сканирование рынков...")
     await scanner.scan_markets()
     await scanner.update_prices()
 
     markets = await db.get_active_markets()
-    logger.info(f"Бот запущен и готов к работе")
-    logger.info(f"  Канал: {config.TELEGRAM_CHANNEL_ID}")
+    users = await db.get_connected_users()
+    logger.info("Бот запущен и готов к работе")
+    logger.info(f"  Канал: {config.TELEGRAM_CHANNEL_ID or 'не задан'}")
     logger.info(f"  Рынков: {len(markets)}")
+    logger.info(f"  Подключённых юзеров: {len(users)}")
     logger.info(f"  Категории: {', '.join(config.CATEGORIES)}")
     logger.info(f"  Часовой пояс: {config.TIMEZONE}")
-    logger.info(f"  Автоторговля: {'вкл' if config.AUTO_TRADE_ENABLED else 'выкл'}")
     logger.info(f"  Скан: каждые {config.SCAN_INTERVAL_MINUTES} мин")
     logger.info(f"  Анализ: каждые {config.DEEP_ANALYSIS_INTERVAL_MINUTES} мин")
 
@@ -120,10 +113,6 @@ def main():
         logger.error("Укажите TELEGRAM_BOT_TOKEN в файле .env")
         sys.exit(1)
 
-    if not config.TELEGRAM_CHANNEL_ID:
-        logger.error("Укажите TELEGRAM_CHANNEL_ID в файле .env")
-        sys.exit(1)
-
     if config.ADMIN_TELEGRAM_ID == 0:
         logger.error("Укажите ADMIN_TELEGRAM_ID в файле .env")
         sys.exit(1)
@@ -132,18 +121,24 @@ def main():
 
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
-    # Регистрация команд
-    app.add_handler(CommandHandler("status", telegram_commands.cmd_status))
-    app.add_handler(CommandHandler("markets", telegram_commands.cmd_markets))
-    app.add_handler(CommandHandler("signals", telegram_commands.cmd_signals))
+    # ConversationHandler для /connect (должен быть перед обычными handlers)
+    app.add_handler(telegram_commands.get_connect_handler())
+
+    # Юзерские команды (личка)
+    app.add_handler(CommandHandler("start", telegram_commands.cmd_start))
+    app.add_handler(CommandHandler("help", telegram_commands.cmd_help))
+    app.add_handler(CommandHandler("disconnect", telegram_commands.cmd_disconnect))
     app.add_handler(CommandHandler("portfolio", telegram_commands.cmd_portfolio))
+    app.add_handler(CommandHandler("trade", telegram_commands.cmd_trade))
+    app.add_handler(CommandHandler("close", telegram_commands.cmd_close))
+    app.add_handler(CommandHandler("markets", telegram_commands.cmd_markets))
+
+    # Админские команды
+    app.add_handler(CommandHandler("status", telegram_commands.cmd_status))
+    app.add_handler(CommandHandler("signals", telegram_commands.cmd_signals))
     app.add_handler(CommandHandler("scan", telegram_commands.cmd_scan))
     app.add_handler(CommandHandler("pause", telegram_commands.cmd_pause))
     app.add_handler(CommandHandler("resume", telegram_commands.cmd_resume))
-    app.add_handler(CommandHandler("trade", telegram_commands.cmd_trade))
-    app.add_handler(CommandHandler("close", telegram_commands.cmd_close))
-    app.add_handler(CommandHandler("help", telegram_commands.cmd_help))
-    app.add_handler(CommandHandler("start", telegram_commands.cmd_help))
 
     logger.info("Бот запущен, ожидание команд...")
     app.run_polling(drop_pending_updates=True)

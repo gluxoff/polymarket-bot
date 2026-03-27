@@ -53,6 +53,7 @@ async def init_db():
 
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER REFERENCES users(id),
                 signal_id INTEGER REFERENCES signals(id),
                 market_id INTEGER REFERENCES markets(id),
                 token_id TEXT NOT NULL,
@@ -66,6 +67,17 @@ async def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE NOT NULL,
+                username TEXT,
+                api_key TEXT,
+                api_secret TEXT,
+                api_passphrase TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS daily_pnl (
                 date TEXT PRIMARY KEY,
                 total_pnl REAL DEFAULT 0,
@@ -76,6 +88,67 @@ async def init_db():
         """)
         await db.commit()
     logger.info("БД инициализирована")
+
+
+# ── Users ────────────────────────────────────────────────────
+
+async def save_user(telegram_id: int, username: str = "") -> int:
+    """Зарегистрировать пользователя, вернуть user_id"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        cursor = await conn.execute(
+            "SELECT id FROM users WHERE telegram_id = ?", (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return row[0]
+        cursor = await conn.execute(
+            "INSERT INTO users (telegram_id, username) VALUES (?, ?)",
+            (telegram_id, username),
+        )
+        await conn.commit()
+        return cursor.lastrowid
+
+
+async def get_user_by_telegram_id(telegram_id: int) -> dict | None:
+    """Получить пользователя по Telegram ID"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def save_user_api_keys(telegram_id: int, api_key: str, api_secret: str, api_passphrase: str):
+    """Сохранить API ключи пользователя"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            """UPDATE users SET api_key=?, api_secret=?, api_passphrase=?, is_active=1
+               WHERE telegram_id=?""",
+            (api_key, api_secret, api_passphrase, telegram_id),
+        )
+        await conn.commit()
+
+
+async def delete_user_api_keys(telegram_id: int):
+    """Удалить API ключи пользователя"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE users SET api_key=NULL, api_secret=NULL, api_passphrase=NULL WHERE telegram_id=?",
+            (telegram_id,),
+        )
+        await conn.commit()
+
+
+async def get_connected_users() -> list[dict]:
+    """Все пользователи с подключёнными API ключами"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM users WHERE api_key IS NOT NULL AND is_active = 1"
+        )
+        return [dict(row) for row in await cursor.fetchall()]
 
 
 # ── Markets ──────────────────────────────────────────────────
@@ -252,6 +325,7 @@ async def get_unpublished_signals() -> list[dict]:
 # ── Trades ───────────────────────────────────────────────────
 
 async def save_trade(
+    user_id: int,
     signal_id: int | None,
     market_id: int,
     token_id: str,
@@ -262,14 +336,14 @@ async def save_trade(
     status: str = "pending",
 ) -> int:
     """Сохранить сделку"""
-    async with aiosqlite.connect(config.DB_PATH) as db:
-        cursor = await db.execute(
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        cursor = await conn.execute(
             """INSERT INTO trades
-               (signal_id, market_id, token_id, side, size_usdc, price, order_id, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (signal_id, market_id, token_id, side, size_usdc, price, order_id, status),
+               (user_id, signal_id, market_id, token_id, side, size_usdc, price, order_id, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, signal_id, market_id, token_id, side, size_usdc, price, order_id, status),
         )
-        await db.commit()
+        await conn.commit()
         return cursor.lastrowid
 
 
@@ -289,30 +363,89 @@ async def update_trade_status(trade_id: int, status: str, pnl: float = 0):
         await db.commit()
 
 
-async def get_open_trades() -> list[dict]:
-    """Все открытые сделки"""
-    async with aiosqlite.connect(config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """SELECT t.*, m.question, m.category
-               FROM trades t JOIN markets m ON t.market_id = m.id
-               WHERE t.status IN ('pending', 'filled')
-               ORDER BY t.created_at DESC"""
-        )
+async def get_open_trades(user_id: int | None = None) -> list[dict]:
+    """Открытые сделки (все или по user_id)"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        if user_id:
+            cursor = await conn.execute(
+                """SELECT t.*, m.question, m.category
+                   FROM trades t JOIN markets m ON t.market_id = m.id
+                   WHERE t.status IN ('pending', 'filled') AND t.user_id = ?
+                   ORDER BY t.created_at DESC""",
+                (user_id,),
+            )
+        else:
+            cursor = await conn.execute(
+                """SELECT t.*, m.question, m.category
+                   FROM trades t JOIN markets m ON t.market_id = m.id
+                   WHERE t.status IN ('pending', 'filled')
+                   ORDER BY t.created_at DESC"""
+            )
         return [dict(row) for row in await cursor.fetchall()]
 
 
-async def get_trade_history(limit: int = 50) -> list[dict]:
-    """История сделок"""
-    async with aiosqlite.connect(config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """SELECT t.*, m.question, m.category
-               FROM trades t JOIN markets m ON t.market_id = m.id
-               ORDER BY t.created_at DESC LIMIT ?""",
-            (limit,),
-        )
+async def get_trade_history(limit: int = 50, user_id: int | None = None) -> list[dict]:
+    """История сделок (все или по user_id)"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        if user_id:
+            cursor = await conn.execute(
+                """SELECT t.*, m.question, m.category
+                   FROM trades t JOIN markets m ON t.market_id = m.id
+                   WHERE t.user_id = ?
+                   ORDER BY t.created_at DESC LIMIT ?""",
+                (user_id, limit),
+            )
+        else:
+            cursor = await conn.execute(
+                """SELECT t.*, m.question, m.category
+                   FROM trades t JOIN markets m ON t.market_id = m.id
+                   ORDER BY t.created_at DESC LIMIT ?""",
+                (limit,),
+            )
         return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_user_portfolio_stats(user_id: int) -> dict:
+    """Статистика портфеля для конкретного юзера"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+
+        cursor = await conn.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(size_usdc), 0) as total_invested "
+            "FROM trades WHERE status IN ('pending', 'filled') AND user_id = ?",
+            (user_id,),
+        )
+        open_row = await cursor.fetchone()
+
+        cursor = await conn.execute(
+            """SELECT COUNT(*) as cnt,
+                      COALESCE(SUM(pnl), 0) as realized_pnl,
+                      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+                      SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as losses
+               FROM trades WHERE status IN ('closed', 'resolved') AND user_id = ?""",
+            (user_id,),
+        )
+        closed_row = await cursor.fetchone()
+
+        open_positions = open_row["cnt"] if open_row else 0
+        total_invested = open_row["total_invested"] if open_row else 0
+        total_closed = closed_row["cnt"] if closed_row else 0
+        realized_pnl = closed_row["realized_pnl"] if closed_row else 0
+        wins = closed_row["wins"] or 0 if closed_row else 0
+        losses = closed_row["losses"] or 0 if closed_row else 0
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+
+        return {
+            "open_positions": open_positions,
+            "total_invested": total_invested,
+            "total_closed": total_closed,
+            "realized_pnl": realized_pnl,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+        }
 
 
 # ── Daily P&L ────────────────────────────────────────────────

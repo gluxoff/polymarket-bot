@@ -72,13 +72,12 @@ class PolymarketScheduler:
             IntervalTrigger(minutes=config.DEEP_ANALYSIS_INTERVAL_MINUTES),
         )
 
-        # Проверка открытых позиций
-        if config.AUTO_TRADE_ENABLED:
-            self._add_job(
-                "position_check",
-                self._run_position_check,
-                IntervalTrigger(minutes=5),
-            )
+        # Проверка открытых позиций (стоп-лоссы для всех юзеров)
+        self._add_job(
+            "position_check",
+            self._run_position_check,
+            IntervalTrigger(minutes=5),
+        )
 
         # Дневной отчёт
         self._add_job(
@@ -157,10 +156,6 @@ class PolymarketScheduler:
                 await self.publisher.send_signal(signal, chart_path)
                 await db.mark_signal_published(signal["id"])
 
-                # Автоторговля
-                if config.AUTO_TRADE_ENABLED and self.trader:
-                    await self.trader.execute_signal(signal)
-
                 # Пауза между сообщениями
                 await asyncio.sleep(2)
 
@@ -169,7 +164,7 @@ class PolymarketScheduler:
 
     async def _run_position_check(self):
         """Проверка открытых позиций"""
-        if self.is_paused or not self.trader:
+        if self.is_paused:
             return
         try:
             await self.trader.check_open_positions()
@@ -220,13 +215,14 @@ class PolymarketScheduler:
             markets = await db.get_active_markets()
             portfolio = await db.get_portfolio_stats()
 
+            users = await db.get_connected_users()
             text = (
                 f"📊 Статус бота\n\n"
                 f"Рынков: {len(markets)}\n"
+                f"Юзеров: {len(users)}\n"
                 f"Открытых позиций: {portfolio['open_positions']}\n"
                 f"P&L: ${portfolio['realized_pnl']:+.2f}\n"
                 f"Win rate: {portfolio['win_rate']:.0f}%\n"
-                f"Автоторговля: {'✅' if config.AUTO_TRADE_ENABLED else '❌'}\n"
             )
             await self.publisher.notify_admin(text)
         except Exception as e:
