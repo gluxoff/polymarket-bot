@@ -1,5 +1,6 @@
 """Точка входа — запуск Polymarket бота"""
 
+import asyncio
 import sys
 
 from loguru import logger
@@ -107,15 +108,38 @@ async def post_init(application: Application):
     logger.info(f"  Анализ: каждые {config.DEEP_ANALYSIS_INTERVAL_MINUTES} мин")
 
 
+async def run_setup_mode():
+    """Режим настройки — только веб-панель, без Telegram-бота"""
+    await db.init_db()
+
+    from web_admin import start_setup_web_admin
+    await start_setup_web_admin()
+
+    port = config.WEB_ADMIN_PORT or 8081
+    token = config.WEB_ADMIN_TOKEN or "setup"
+    logger.info("=" * 50)
+    logger.info("  РЕЖИМ НАСТРОЙКИ")
+    logger.info(f"  Открой: http://IP:{port}/?token={token}")
+    logger.info("  Заполни настройки и перезапусти бот")
+    logger.info("=" * 50)
+
+    # Бесконечный цикл — ждём пока настроят и перезапустят
+    while True:
+        await asyncio.sleep(3600)
+
+
 def main():
     """Запуск бота"""
+    # Если нет токена — режим настройки (только веб-панель)
     if not config.TELEGRAM_BOT_TOKEN:
-        logger.error("Укажите TELEGRAM_BOT_TOKEN в файле .env")
-        sys.exit(1)
+        logger.warning("TELEGRAM_BOT_TOKEN не задан — запуск в режиме настройки")
+        asyncio.run(run_setup_mode())
+        return
 
     if config.ADMIN_TELEGRAM_ID == 0:
-        logger.error("Укажите ADMIN_TELEGRAM_ID в файле .env")
-        sys.exit(1)
+        logger.warning("ADMIN_TELEGRAM_ID не задан — запуск в режиме настройки")
+        asyncio.run(run_setup_mode())
+        return
 
     logger.info("Запуск Polymarket Bot...")
 
