@@ -4,7 +4,7 @@ import asyncio
 import sys
 
 from loguru import logger
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 import config
 import db
@@ -147,6 +147,9 @@ def main():
 
     # ConversationHandler для /connect (должен быть перед обычными handlers)
     app.add_handler(telegram_commands.get_connect_handler())
+
+    # Callback handler для inline-кнопок
+    app.add_handler(CallbackQueryHandler(telegram_commands.callback_handler))
 
     # Юзерские команды (личка)
     app.add_handler(CommandHandler("start", telegram_commands.cmd_start))

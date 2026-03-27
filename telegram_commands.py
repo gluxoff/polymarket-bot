@@ -1,7 +1,7 @@
 """Команды Telegram-бота — юзерские + админские"""
 
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from loguru import logger
 
 import config
@@ -37,6 +37,21 @@ def _is_private(update: Update) -> bool:
 
 # ── Юзерские команды (личка) ─────────────────────────────────
 
+def _main_menu_keyboard(is_connected: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню с кнопками"""
+    buttons = [
+        [InlineKeyboardButton("📊 Markets", callback_data="menu_markets"),
+         InlineKeyboardButton("💼 Portfolio", callback_data="menu_portfolio")],
+        [InlineKeyboardButton("📋 Signals", callback_data="menu_signals"),
+         InlineKeyboardButton("❓ Help", callback_data="menu_help")],
+    ]
+    if is_connected:
+        buttons.append([InlineKeyboardButton("🔌 Disconnect", callback_data="menu_disconnect")])
+    else:
+        buttons.append([InlineKeyboardButton("🔗 Connect Polymarket", callback_data="menu_connect")])
+    return InlineKeyboardMarkup(buttons)
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Приветствие и регистрация"""
     if not _is_private(update):
@@ -45,20 +60,139 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await db.save_user(user.id, user.username or "")
 
+    db_user = await db.get_user_by_telegram_id(user.id)
+    is_connected = bool(db_user and db_user.get("api_key"))
+
     text = (
         f"👋 Привет, {user.first_name}!\n\n"
         "Я бот для прогнозов на <b>Polymarket</b>.\n\n"
         "📊 Сигналы публикуются в канале автоматически.\n"
-        "💰 Чтобы торговать через меня — подключи свой Polymarket.\n\n"
-        "<b>Команды:</b>\n"
-        "/connect — Подключить Polymarket (API ключи)\n"
-        "/disconnect — Отключить аккаунт\n"
-        "/portfolio — Мой портфель\n"
-        "/trade — Сделать ставку\n"
-        "/markets — Активные рынки\n"
-        "/help — Справка"
+        "💰 Чтобы торговать — подключи свой Polymarket."
     )
-    await update.message.reply_text(text, parse_mode="HTML")
+    keyboard = _main_menu_keyboard(is_connected)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатий inline-кнопок"""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    user = query.from_user
+
+    if data == "menu_markets":
+        await _show_markets(query)
+    elif data == "menu_portfolio":
+        await _show_portfolio(query)
+    elif data == "menu_signals":
+        await _show_signals(query)
+    elif data == "menu_help":
+        await _show_help(query)
+    elif data == "menu_connect":
+        await query.edit_message_text(
+            "🔑 Для подключения отправь команду /connect",
+            parse_mode="HTML",
+        )
+    elif data == "menu_disconnect":
+        await db.delete_user_api_keys(user.id)
+        if _client:
+            _client.remove_user_client(user.id)
+        await query.edit_message_text(
+            "✅ Polymarket отключён. Ключи удалены.\n\nНажми /start для меню.",
+            parse_mode="HTML",
+        )
+    elif data == "menu_back":
+        db_user = await db.get_user_by_telegram_id(user.id)
+        is_connected = bool(db_user and db_user.get("api_key"))
+        text = (
+            f"👋 {user.first_name}, выбери действие:"
+        )
+        await query.edit_message_text(
+            text, parse_mode="HTML",
+            reply_markup=_main_menu_keyboard(is_connected),
+        )
+
+
+def _back_button() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_back")]])
+
+
+async def _show_markets(query):
+    """Показать рынки через кнопку"""
+    markets = await db.get_active_markets()
+    if not markets:
+        await query.edit_message_text("Нет рынков. Подожди первого сканирования.", reply_markup=_back_button())
+        return
+
+    lines = ["📊 <b>Активные рынки</b>\n"]
+    for i, m in enumerate(markets[:15], 1):
+        latest = await db.get_latest_price(m["id"])
+        price = f"{latest['price_yes'] * 100:.0f}%" if latest else "N/A"
+        cat = f"[{m['category']}]" if m.get("category") else ""
+        q = m["question"][:50] + ("..." if len(m["question"]) > 50 else "")
+        lines.append(f"<b>#{m['id']}</b> {cat} {q}\n   YES: {price}")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+
+async def _show_portfolio(query):
+    """Показать портфель через кнопку"""
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user or not user.get("api_key"):
+        await query.edit_message_text(
+            "💼 Polymarket не подключён.\nНажми /connect чтобы подключить.",
+            reply_markup=_back_button(),
+        )
+        return
+
+    stats = await db.get_user_portfolio_stats(user["id"])
+    pnl_emoji = "🟢" if stats["realized_pnl"] >= 0 else "🔴"
+
+    text = (
+        f"💼 <b>Мой портфель</b>\n\n"
+        f"📂 Открытых: {stats['open_positions']} (${stats['total_invested']:.2f})\n"
+        f"{pnl_emoji} P&L: <b>${stats['realized_pnl']:+.2f}</b>\n"
+        f"📊 Win rate: {stats['win_rate']:.0f}% ({stats['wins']}W / {stats['losses']}L)"
+    )
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+
+async def _show_signals(query):
+    """Показать последние сигналы через кнопку"""
+    signals = await db.get_recent_signals(10)
+    if not signals:
+        await query.edit_message_text("Нет сигналов пока.", reply_markup=_back_button())
+        return
+
+    lines = ["📋 <b>Последние сигналы</b>\n"]
+    for s in signals:
+        q = s["question"][:45] + ("..." if len(s["question"]) > 45 else "")
+        change = s.get("probability_change", 0) * 100
+        emoji = "🟢" if s["direction"] == "BUY" else "🔴"
+        lines.append(f"{emoji} {s['direction']} | {q}\n   {change:+.1f}% | {s['signal_type']}")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+
+async def _show_help(query):
+    """Справка через кнопку"""
+    text = (
+        "📊 <b>Polymarket Bot</b>\n\n"
+        "<b>Команды:</b>\n"
+        "/connect — Подключить Polymarket API\n"
+        "/disconnect — Отключить аккаунт\n"
+        "/trade &lt;id&gt; &lt;YES/NO&gt; &lt;$&gt; — Ставка\n"
+        "/close &lt;trade_id&gt; — Закрыть позицию\n\n"
+        "Кнопки меню доступны через /start"
+    )
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
