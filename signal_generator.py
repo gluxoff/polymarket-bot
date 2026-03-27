@@ -46,7 +46,7 @@ class SignalGenerator:
             confidence = self._calculate_confidence(analysis, reasons)
 
             # Пропускаем слабые сигналы
-            if confidence < 0.3:
+            if confidence < 0.5:
                 continue
 
             # GPT-анализ (опционально)
@@ -88,6 +88,10 @@ class SignalGenerator:
                 f"Сигнал: {direction} '{market['question'][:50]}...' "
                 f"(conf={confidence:.2f}, type={signal_type})"
             )
+
+        # Сортируем по уверенности и берём топ-10
+        signals.sort(key=lambda s: s["confidence"], reverse=True)
+        signals = signals[:10]
 
         return signals
 

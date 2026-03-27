@@ -100,7 +100,7 @@ SCAN_INTERVAL_MINUTES = int(_get(_js, "scan_interval_minutes", "SCAN_INTERVAL_MI
 DEEP_ANALYSIS_INTERVAL_MINUTES = int(_get(_js, "deep_analysis_interval_minutes", "DEEP_ANALYSIS_INTERVAL_MINUTES", 60))
 
 # Пороги сигналов
-PROBABILITY_SHIFT_THRESHOLD = float(_get(_js, "probability_shift_threshold", "PROBABILITY_SHIFT_THRESHOLD", 0.05))
+PROBABILITY_SHIFT_THRESHOLD = float(_get(_js, "probability_shift_threshold", "PROBABILITY_SHIFT_THRESHOLD", 0.08))
 VOLUME_SPIKE_MULTIPLIER = float(_get(_js, "volume_spike_multiplier", "VOLUME_SPIKE_MULTIPLIER", 2.0))
 
 # Риск-менеджмент
