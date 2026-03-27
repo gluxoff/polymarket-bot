@@ -143,24 +143,109 @@ class PolymarketScheduler:
 
             logger.info(f"Сгенерировано {len(new_signals)} сигналов")
 
-            # Публикация
+            # Публикация в канал
             for signal in new_signals:
-                # Генерация графика
                 chart_path = None
                 if self.chart_gen:
                     chart_path = await self.chart_gen.generate_probability_chart(
                         signal["market_id"]
                     )
 
-                # Публикация в Telegram
                 await self.publisher.send_signal(signal, chart_path)
                 await db.mark_signal_published(signal["id"])
-
-                # Пауза между сообщениями
                 await asyncio.sleep(2)
+
+            # Автоставки для подписанных юзеров
+            await self._run_auto_trades(new_signals)
 
         except Exception as e:
             logger.error(f"Ошибка анализа/публикации: {e}")
+
+    async def _run_auto_trades(self, signals: list[dict]):
+        """Выполнить автоставки для юзеров с включённым auto_trade"""
+        auto_users = await db.get_auto_trade_users()
+        if not auto_users:
+            return
+
+        from polymarket_client import PolymarketClient
+        client: PolymarketClient = self.scanner.client
+
+        for user in auto_users:
+            try:
+                amount = user.get("auto_amount", 5.0)
+                max_daily = user.get("auto_max_daily", 50.0)
+                min_conf = user.get("auto_min_confidence", 0.6)
+
+                # Проверяем дневной лимит
+                user_stats = await db.get_user_portfolio_stats(user["id"])
+                today_pnl = await db.get_today_pnl()
+                today_spent = abs(today_pnl.get("total_pnl", 0)) + (user_stats.get("total_invested", 0))
+
+                trades_placed = 0
+                for signal in signals:
+                    if signal["confidence"] < min_conf:
+                        continue
+                    if today_spent + amount > max_daily:
+                        logger.info(f"Автоставки: юзер {user['telegram_id']} — дневной лимит ${max_daily}")
+                        break
+
+                    # Получаем CLOB клиент юзера
+                    user_clob = await client.get_user_client(
+                        user["telegram_id"],
+                        user["api_key"], user["api_secret"], user["api_passphrase"],
+                    )
+                    if not user_clob:
+                        logger.error(f"Автоставки: CLOB недоступен для {user['telegram_id']}")
+                        break
+
+                    # Определяем токен
+                    token_id = signal.get("token_id_yes") if signal["direction"] == "BUY" else signal.get("token_id_no")
+                    if not token_id:
+                        continue
+
+                    price = await client.get_midpoint(token_id)
+                    if not price or price <= 0 or price >= 1:
+                        continue
+
+                    shares = amount / price
+                    result = await user_clob.place_order(token_id, "BUY", shares, price)
+
+                    if result:
+                        order_id = result.get("orderID", result.get("id", ""))
+                        await db.save_trade(
+                            user_id=user["id"],
+                            signal_id=signal.get("id"),
+                            market_id=signal["market_id"],
+                            token_id=token_id,
+                            side="BUY",
+                            size_usdc=amount,
+                            price=price,
+                            order_id=order_id,
+                            status="filled",
+                        )
+                        trades_placed += 1
+                        today_spent += amount
+                        logger.info(
+                            f"Автоставка: юзер {user['telegram_id']} — "
+                            f"{signal['direction']} ${amount} на '{signal['question'][:40]}'"
+                        )
+                    await asyncio.sleep(1)
+
+                if trades_placed:
+                    # Уведомляем юзера
+                    try:
+                        from telegram import Bot
+                        bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
+                        await bot.send_message(
+                            chat_id=user["telegram_id"],
+                            text=f"🤖 Автоставки: размещено <b>{trades_placed}</b> ставок по ${amount:.0f}",
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                logger.error(f"Автоставки ошибка для {user['telegram_id']}: {e}")
 
     async def _run_position_check(self):
         """Проверка открытых позиций"""

@@ -74,6 +74,10 @@ async def init_db():
                 api_key TEXT,
                 api_secret TEXT,
                 api_passphrase TEXT,
+                auto_trade INTEGER DEFAULT 0,
+                auto_amount REAL DEFAULT 5.0,
+                auto_max_daily REAL DEFAULT 50.0,
+                auto_min_confidence REAL DEFAULT 0.6,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -147,6 +151,39 @@ async def get_connected_users() -> list[dict]:
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute(
             "SELECT * FROM users WHERE api_key IS NOT NULL AND is_active = 1"
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def set_auto_trade(telegram_id: int, enabled: bool):
+    """Включить/выключить автоставки"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE users SET auto_trade = ? WHERE telegram_id = ?",
+            (1 if enabled else 0, telegram_id),
+        )
+        await conn.commit()
+
+
+async def set_auto_trade_settings(telegram_id: int, amount: float = None,
+                                   max_daily: float = None, min_confidence: float = None):
+    """Обновить настройки автоставок"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        if amount is not None:
+            await conn.execute("UPDATE users SET auto_amount = ? WHERE telegram_id = ?", (amount, telegram_id))
+        if max_daily is not None:
+            await conn.execute("UPDATE users SET auto_max_daily = ? WHERE telegram_id = ?", (max_daily, telegram_id))
+        if min_confidence is not None:
+            await conn.execute("UPDATE users SET auto_min_confidence = ? WHERE telegram_id = ?", (min_confidence, telegram_id))
+        await conn.commit()
+
+
+async def get_auto_trade_users() -> list[dict]:
+    """Пользователи с включёнными автоставками"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM users WHERE api_key IS NOT NULL AND auto_trade = 1 AND is_active = 1"
         )
         return [dict(row) for row in await cursor.fetchall()]
 

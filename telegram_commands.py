@@ -48,6 +48,7 @@ def _main_menu_keyboard(is_connected: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio"),
             InlineKeyboardButton("📂 Позиции", callback_data="menu_positions"),
         ])
+        buttons.append([InlineKeyboardButton("🤖 Автоставки", callback_data="menu_autotrade")])
         buttons.append([InlineKeyboardButton("🔌 Отключить", callback_data="menu_disconnect")])
     else:
         buttons.append([InlineKeyboardButton("🔗 Подключить Polymarket", callback_data="menu_connect")])
@@ -106,6 +107,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "✅ Polymarket отключён.\n\nНажми /start для меню.",
             )
+        elif data == "menu_autotrade":
+            await _show_autotrade(query)
+        elif data == "autotrade_toggle":
+            await _toggle_autotrade(query)
+        elif data.startswith("autotrade_amount_"):
+            amount = float(data.split("_")[2])
+            await _set_autotrade_amount(query, amount)
+        elif data.startswith("autotrade_daily_"):
+            daily = float(data.split("_")[2])
+            await _set_autotrade_daily(query, daily)
+        elif data.startswith("autotrade_conf_"):
+            conf = float(data.split("_")[2]) / 100
+            await _set_autotrade_confidence(query, conf)
         elif data.startswith("market_"):
             market_id = int(data.split("_")[1])
             await _show_market_detail(query, market_id)
@@ -459,6 +473,74 @@ async def _show_signals(query):
     if len(text) > 4000:
         text = text[:4000] + "\n..."
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+
+async def _show_autotrade(query):
+    """Настройки автоставок"""
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user or not user.get("api_key"):
+        await query.edit_message_text("❌ Сначала подключи Polymarket.", reply_markup=_back_button())
+        return
+
+    enabled = user.get("auto_trade", 0)
+    amount = user.get("auto_amount", 5.0)
+    max_daily = user.get("auto_max_daily", 50.0)
+    min_conf = user.get("auto_min_confidence", 0.6)
+
+    status = "🟢 ВКЛЮЧЕНЫ" if enabled else "🔴 ВЫКЛЮЧЕНЫ"
+
+    text = (
+        f"🤖 <b>Автоставки</b>\n\n"
+        f"Статус: <b>{status}</b>\n"
+        f"💰 Сумма за ставку: <b>${amount:.0f}</b>\n"
+        f"📊 Лимит в день: <b>${max_daily:.0f}</b>\n"
+        f"🎯 Мин. уверенность: <b>{min_conf*100:.0f}%</b>\n\n"
+        f"Когда бот находит сигнал с уверенностью ≥ {min_conf*100:.0f}%, "
+        f"он автоматически ставит ${amount:.0f} от твоего имени."
+    )
+
+    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+
+    buttons = [
+        [InlineKeyboardButton(toggle_text, callback_data="autotrade_toggle")],
+        [InlineKeyboardButton("$1", callback_data="autotrade_amount_1"),
+         InlineKeyboardButton("$2", callback_data="autotrade_amount_2"),
+         InlineKeyboardButton("$5", callback_data="autotrade_amount_5"),
+         InlineKeyboardButton("$10", callback_data="autotrade_amount_10")],
+        [InlineKeyboardButton("Daily $25", callback_data="autotrade_daily_25"),
+         InlineKeyboardButton("$50", callback_data="autotrade_daily_50"),
+         InlineKeyboardButton("$100", callback_data="autotrade_daily_100")],
+        [InlineKeyboardButton("Conf 60%", callback_data="autotrade_conf_60"),
+         InlineKeyboardButton("70%", callback_data="autotrade_conf_70"),
+         InlineKeyboardButton("80%", callback_data="autotrade_conf_80")],
+        [InlineKeyboardButton("◀️ Меню", callback_data="menu_back")],
+    ]
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _toggle_autotrade(query):
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user:
+        return
+    new_state = not bool(user.get("auto_trade", 0))
+    await db.set_auto_trade(query.from_user.id, new_state)
+    await _show_autotrade(query)
+
+
+async def _set_autotrade_amount(query, amount: float):
+    await db.set_auto_trade_settings(query.from_user.id, amount=amount)
+    await _show_autotrade(query)
+
+
+async def _set_autotrade_daily(query, daily: float):
+    await db.set_auto_trade_settings(query.from_user.id, max_daily=daily)
+    await _show_autotrade(query)
+
+
+async def _set_autotrade_confidence(query, conf: float):
+    await db.set_auto_trade_settings(query.from_user.id, min_confidence=conf)
+    await _show_autotrade(query)
 
 
 async def _show_help(query):
