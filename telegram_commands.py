@@ -40,15 +40,18 @@ def _is_private(update: Update) -> bool:
 def _main_menu_keyboard(is_connected: bool = False) -> InlineKeyboardMarkup:
     """Главное меню с кнопками"""
     buttons = [
-        [InlineKeyboardButton("📊 Markets", callback_data="menu_markets"),
-         InlineKeyboardButton("💼 Portfolio", callback_data="menu_portfolio")],
-        [InlineKeyboardButton("📋 Signals", callback_data="menu_signals"),
-         InlineKeyboardButton("❓ Help", callback_data="menu_help")],
+        [InlineKeyboardButton("📊 Рынки", callback_data="menu_markets"),
+         InlineKeyboardButton("📋 Сигналы", callback_data="menu_signals")],
     ]
     if is_connected:
-        buttons.append([InlineKeyboardButton("🔌 Disconnect", callback_data="menu_disconnect")])
+        buttons.append([
+            InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio"),
+            InlineKeyboardButton("📂 Позиции", callback_data="menu_positions"),
+        ])
+        buttons.append([InlineKeyboardButton("🔌 Отключить", callback_data="menu_disconnect")])
     else:
-        buttons.append([InlineKeyboardButton("🔗 Connect Polymarket", callback_data="menu_connect")])
+        buttons.append([InlineKeyboardButton("🔗 Подключить Polymarket", callback_data="menu_connect")])
+    buttons.append([InlineKeyboardButton("❓ Помощь", callback_data="menu_help")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -81,62 +84,252 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = query.from_user
 
-    if data == "menu_markets":
-        await _show_markets(query)
-    elif data == "menu_portfolio":
-        await _show_portfolio(query)
-    elif data == "menu_signals":
-        await _show_signals(query)
-    elif data == "menu_help":
-        await _show_help(query)
-    elif data == "menu_connect":
-        await query.edit_message_text(
-            "🔑 Для подключения отправь команду /connect",
-            parse_mode="HTML",
-        )
-    elif data == "menu_disconnect":
-        await db.delete_user_api_keys(user.id)
-        if _client:
-            _client.remove_user_client(user.id)
-        await query.edit_message_text(
-            "✅ Polymarket отключён. Ключи удалены.\n\nНажми /start для меню.",
-            parse_mode="HTML",
-        )
-    elif data == "menu_back":
-        db_user = await db.get_user_by_telegram_id(user.id)
-        is_connected = bool(db_user and db_user.get("api_key"))
-        text = (
-            f"👋 {user.first_name}, выбери действие:"
-        )
-        await query.edit_message_text(
-            text, parse_mode="HTML",
-            reply_markup=_main_menu_keyboard(is_connected),
-        )
+    try:
+        if data == "menu_markets" or data.startswith("markets_page_"):
+            page = int(data.split("_")[-1]) if data.startswith("markets_page_") else 0
+            await _show_markets(query, page)
+        elif data == "menu_portfolio":
+            await _show_portfolio(query)
+        elif data == "menu_signals":
+            await _show_signals(query)
+        elif data == "menu_help":
+            await _show_help(query)
+        elif data == "menu_connect":
+            await query.edit_message_text(
+                "🔑 Для подключения отправь команду /connect",
+                parse_mode="HTML",
+            )
+        elif data == "menu_disconnect":
+            await db.delete_user_api_keys(user.id)
+            if _client:
+                _client.remove_user_client(user.id)
+            await query.edit_message_text(
+                "✅ Polymarket отключён.\n\nНажми /start для меню.",
+            )
+        elif data.startswith("market_"):
+            market_id = int(data.split("_")[1])
+            await _show_market_detail(query, market_id)
+        elif data.startswith("buy_yes_") or data.startswith("buy_no_"):
+            parts = data.split("_")
+            side = "YES" if parts[1] == "yes" else "NO"
+            market_id = int(parts[2])
+            await _show_trade_confirm(query, market_id, side)
+        elif data.startswith("confirm_trade_"):
+            parts = data.split("_")
+            side = parts[2].upper()
+            market_id = int(parts[3])
+            amount = float(parts[4])
+            await _execute_trade(query, market_id, side, amount)
+        elif data == "menu_positions":
+            await _show_positions(query)
+        elif data.startswith("close_pos_"):
+            trade_id = int(data.split("_")[2])
+            await _close_position(query, trade_id)
+        elif data == "menu_back":
+            db_user = await db.get_user_by_telegram_id(user.id)
+            is_connected = bool(db_user and db_user.get("api_key"))
+            await query.edit_message_text(
+                f"👋 {user.first_name}, выбери действие:",
+                parse_mode="HTML",
+                reply_markup=_main_menu_keyboard(is_connected),
+            )
+    except Exception as e:
+        logger.error(f"Ошибка callback {data}: {e}")
+        await query.edit_message_text(f"❌ Ошибка: {e}\n\nНажми /start")
 
 
 def _back_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_back")]])
 
 
-async def _show_markets(query):
-    """Показать рынки через кнопку"""
+MARKETS_PER_PAGE = 10
+
+
+async def _show_markets(query, page: int = 0):
+    """Показать рынки с кнопками и пагинацией"""
     markets = await db.get_active_markets()
     if not markets:
-        await query.edit_message_text("Нет рынков. Подожди первого сканирования.", reply_markup=_back_button())
+        await query.edit_message_text("Нет рынков.", reply_markup=_back_button())
         return
 
-    lines = ["📊 <b>Активные рынки</b>\n"]
-    for i, m in enumerate(markets[:15], 1):
+    total = len(markets)
+    start = page * MARKETS_PER_PAGE
+    end = start + MARKETS_PER_PAGE
+    page_markets = markets[start:end]
+
+    lines = [f"📊 <b>Рынки</b> ({start+1}-{min(end, total)} из {total})\n"]
+    for m in page_markets:
         latest = await db.get_latest_price(m["id"])
-        price = f"{latest['price_yes'] * 100:.0f}%" if latest else "N/A"
+        price = f"{latest['price_yes'] * 100:.0f}%" if latest and latest["price_yes"] else "—"
         cat = f"[{m['category']}]" if m.get("category") else ""
         q = m["question"][:50] + ("..." if len(m["question"]) > 50 else "")
         lines.append(f"<b>#{m['id']}</b> {cat} {q}\n   YES: {price}")
 
     text = "\n".join(lines)
-    if len(text) > 4000:
-        text = text[:4000] + "\n..."
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+    # Кнопки рынков (для деталей)
+    buttons = []
+    row = []
+    for m in page_markets:
+        row.append(InlineKeyboardButton(f"#{m['id']}", callback_data=f"market_{m['id']}"))
+        if len(row) == 5:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    # Пагинация
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Пред", callback_data=f"markets_page_{page-1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton("След ▶️", callback_data=f"markets_page_{page+1}"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([InlineKeyboardButton("◀️ Меню", callback_data="menu_back")])
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _show_market_detail(query, market_id: int):
+    """Детали рынка с кнопками Buy YES / Buy NO"""
+    market = await db.get_market_by_id(market_id)
+    if not market:
+        await query.edit_message_text("Рынок не найден.", reply_markup=_back_button())
+        return
+
+    latest = await db.get_latest_price(market_id)
+    price_yes = latest["price_yes"] if latest and latest["price_yes"] else None
+    price_no = latest["price_no"] if latest and latest["price_no"] else None
+
+    price_yes_str = f"{price_yes * 100:.1f}%" if price_yes else "N/A"
+    price_no_str = f"{price_no * 100:.1f}%" if price_no else "N/A"
+
+    cat = f"#{market['category']}" if market.get("category") else ""
+    url = market.get("polymarket_url", "")
+
+    text = (
+        f"📊 <b>Рынок #{market_id}</b>\n\n"
+        f"❓ {market['question']}\n\n"
+        f"✅ YES: <b>{price_yes_str}</b>\n"
+        f"❌ NO: <b>{price_no_str}</b>\n"
+    )
+    if cat:
+        text += f"\n🏷 {cat}"
+    if url:
+        text += f'\n🔗 <a href="{url}">Polymarket</a>'
+
+    buttons = [
+        [InlineKeyboardButton(f"🟢 Buy YES ({price_yes_str})", callback_data=f"buy_yes_{market_id}"),
+         InlineKeyboardButton(f"🔴 Buy NO ({price_no_str})", callback_data=f"buy_no_{market_id}")],
+        [InlineKeyboardButton("◀️ К рынкам", callback_data="menu_markets")],
+    ]
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _show_trade_confirm(query, market_id: int, side: str):
+    """Выбор суммы ставки"""
+    market = await db.get_market_by_id(market_id)
+    if not market:
+        return
+
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user or not user.get("api_key"):
+        await query.edit_message_text(
+            "❌ Сначала подключи Polymarket через /connect",
+            reply_markup=_back_button(),
+        )
+        return
+
+    q = market["question"][:60]
+    text = (
+        f"💰 <b>Ставка: {side}</b>\n\n"
+        f"❓ {q}\n\n"
+        f"Выбери сумму:"
+    )
+
+    buttons = [
+        [InlineKeyboardButton("$1", callback_data=f"confirm_trade_{side.lower()}_{market_id}_1"),
+         InlineKeyboardButton("$2", callback_data=f"confirm_trade_{side.lower()}_{market_id}_2"),
+         InlineKeyboardButton("$5", callback_data=f"confirm_trade_{side.lower()}_{market_id}_5")],
+        [InlineKeyboardButton("$10", callback_data=f"confirm_trade_{side.lower()}_{market_id}_10"),
+         InlineKeyboardButton("$25", callback_data=f"confirm_trade_{side.lower()}_{market_id}_25"),
+         InlineKeyboardButton("$50", callback_data=f"confirm_trade_{side.lower()}_{market_id}_50")],
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"market_{market_id}")],
+    ]
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _execute_trade(query, market_id: int, side: str, amount: float):
+    """Выполнить ставку"""
+    user_data = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user_data or not user_data.get("api_key"):
+        await query.edit_message_text("❌ Polymarket не подключён.", reply_markup=_back_button())
+        return
+
+    market = await db.get_market_by_id(market_id)
+    if not market:
+        await query.edit_message_text("❌ Рынок не найден.", reply_markup=_back_button())
+        return
+
+    token_id = market["token_id_yes"] if side == "YES" else market["token_id_no"]
+    if not token_id:
+        await query.edit_message_text("❌ Нет токена.", reply_markup=_back_button())
+        return
+
+    user_clob = await _client.get_user_client(
+        query.from_user.id,
+        user_data["api_key"], user_data["api_secret"], user_data["api_passphrase"],
+    )
+    if not user_clob:
+        await query.edit_message_text("❌ Ошибка подключения. Переподключись: /connect", reply_markup=_back_button())
+        return
+
+    price = await _client.get_midpoint(token_id)
+    if not price or price <= 0 or price >= 1:
+        await query.edit_message_text("❌ Не удалось получить цену.", reply_markup=_back_button())
+        return
+
+    shares = amount / price
+
+    await query.edit_message_text(f"⏳ Размещаю {side} ${amount:.0f}...")
+
+    result = await user_clob.place_order(token_id, "BUY", shares, price)
+    if not result:
+        await query.edit_message_text(
+            "❌ Ордер не размещён. Проверь баланс USDC.",
+            reply_markup=_back_button(),
+        )
+        return
+
+    order_id = result.get("orderID", result.get("id", ""))
+    trade_id = await db.save_trade(
+        user_id=user_data["id"],
+        signal_id=None,
+        market_id=market_id,
+        token_id=token_id,
+        side="BUY",
+        size_usdc=amount,
+        price=price,
+        order_id=order_id,
+        status="filled",
+    )
+
+    q = market["question"][:50]
+    await query.edit_message_text(
+        f"✅ <b>Ставка размещена!</b>\n\n"
+        f"🎯 {side} ${amount:.0f} @ {price:.4f}\n"
+        f"📋 {q}\n"
+        f"🆔 Trade #{trade_id}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio"),
+             InlineKeyboardButton("◀️ Меню", callback_data="menu_back")],
+        ]),
+    )
 
 
 async def _show_portfolio(query):
@@ -150,6 +343,7 @@ async def _show_portfolio(query):
         return
 
     stats = await db.get_user_portfolio_stats(user["id"])
+    open_trades = await db.get_open_trades(user_id=user["id"])
     pnl_emoji = "🟢" if stats["realized_pnl"] >= 0 else "🔴"
 
     text = (
@@ -158,7 +352,93 @@ async def _show_portfolio(query):
         f"{pnl_emoji} P&L: <b>${stats['realized_pnl']:+.2f}</b>\n"
         f"📊 Win rate: {stats['win_rate']:.0f}% ({stats['wins']}W / {stats['losses']}L)"
     )
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
+
+    if open_trades:
+        text += "\n\n<b>Позиции:</b>"
+        for t in open_trades[:8]:
+            q = t["question"][:35] + ("..." if len(t["question"]) > 35 else "")
+            text += f"\n  #{t['id']} {t['side']} ${t['size_usdc']:.2f} — {q}"
+
+    buttons = []
+    if open_trades:
+        buttons.append([InlineKeyboardButton("📂 Мои позиции", callback_data="menu_positions")])
+    buttons.append([InlineKeyboardButton("◀️ Меню", callback_data="menu_back")])
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _show_positions(query):
+    """Показать открытые позиции с кнопками закрытия"""
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user:
+        await query.edit_message_text("Нажми /start", reply_markup=_back_button())
+        return
+
+    open_trades = await db.get_open_trades(user_id=user["id"])
+    if not open_trades:
+        await query.edit_message_text("📂 Нет открытых позиций.", reply_markup=_back_button())
+        return
+
+    lines = ["📂 <b>Открытые позиции</b>\n"]
+    buttons = []
+    for t in open_trades[:10]:
+        q = t["question"][:40] + ("..." if len(t["question"]) > 40 else "")
+        lines.append(f"<b>#{t['id']}</b> {t['side']} ${t['size_usdc']:.2f} @ {t['price']:.4f}\n   {q}")
+        buttons.append([InlineKeyboardButton(f"❌ Закрыть #{t['id']}", callback_data=f"close_pos_{t['id']}")])
+
+    buttons.append([InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio")])
+    buttons.append([InlineKeyboardButton("◀️ Меню", callback_data="menu_back")])
+
+    text = "\n".join(lines)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _close_position(query, trade_id: int):
+    """Закрыть позицию через кнопку"""
+    user = await db.get_user_by_telegram_id(query.from_user.id)
+    if not user or not user.get("api_key"):
+        await query.edit_message_text("❌ Polymarket не подключён.", reply_markup=_back_button())
+        return
+
+    open_trades = await db.get_open_trades(user_id=user["id"])
+    trade = next((t for t in open_trades if t["id"] == trade_id), None)
+    if not trade:
+        await query.edit_message_text(f"❌ Позиция #{trade_id} не найдена.", reply_markup=_back_button())
+        return
+
+    user_clob = await _client.get_user_client(
+        query.from_user.id, user["api_key"], user["api_secret"], user["api_passphrase"],
+    )
+    if not user_clob:
+        await query.edit_message_text("❌ Ошибка подключения.", reply_markup=_back_button())
+        return
+
+    await query.edit_message_text(f"⏳ Закрываю позицию #{trade_id}...")
+
+    current_price = await _client.get_midpoint(trade["token_id"])
+    if not current_price:
+        await query.edit_message_text("❌ Не удалось получить цену.", reply_markup=_back_button())
+        return
+
+    shares = trade["size_usdc"] / trade["price"] if trade["price"] > 0 else 0
+    result = await user_clob.place_order(trade["token_id"], "SELL", shares, current_price)
+
+    if not result:
+        await query.edit_message_text("❌ Не удалось закрыть.", reply_markup=_back_button())
+        return
+
+    pnl = (current_price - trade["price"]) * shares
+    await db.update_trade_status(trade_id, status="closed", pnl=pnl)
+    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+
+    await query.edit_message_text(
+        f"✅ Позиция #{trade_id} закрыта\n{pnl_emoji} P&L: ${pnl:+.2f}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio"),
+             InlineKeyboardButton("◀️ Меню", callback_data="menu_back")],
+        ]),
+    )
 
 
 async def _show_signals(query):
