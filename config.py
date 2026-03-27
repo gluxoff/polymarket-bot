@@ -82,17 +82,16 @@ CATEGORIES = _get_list(_js, "categories", "CATEGORIES", "politics,economics")
 CATEGORY_KEYWORDS = {
     "politics": [
         "election", "president", "trump", "biden", "congress", "senate",
-        "governor", "mayor", "vote", "ballot", "democrat", "republican",
+        "governor", "vote", "ballot", "democrat", "republican",
         "political", "impeach", "cabinet", "minister", "parliament",
-        "legislation", "law", "bill", "act", "regulation", "sanction",
-        "diplomatic", "nato", "un ", "war", "ceasefire", "treaty",
+        "nato", "ceasefire", "treaty", "executive order",
     ],
     "economics": [
-        "gdp", "inflation", "interest rate", "fed ", "federal reserve",
+        "gdp", "inflation", "interest rate", "fed rate", "federal reserve",
         "ecb", "tariff", "trade war", "recession", "unemployment",
-        "stock", "s&p", "nasdaq", "dow", "market", "economy",
-        "debt", "deficit", "tax", "fiscal", "monetary", "bond",
-        "oil", "opec", "commodity", "currency", "dollar",
+        "s&p 500", "nasdaq", "dow jones", "stock market",
+        "national debt", "deficit", "fiscal", "monetary policy",
+        "oil price", "opec",
     ],
 }
 
