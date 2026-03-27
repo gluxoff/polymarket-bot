@@ -144,7 +144,14 @@ class MarketScanner:
         title = (event.get("title") or "").lower()
         description = (event.get("description") or "").lower()
         slug = (event.get("slug") or "").lower()
-        tags = " ".join(t.lower() for t in (event.get("tags") or []))
+        raw_tags = event.get("tags") or []
+        tag_parts = []
+        for t in raw_tags:
+            if isinstance(t, str):
+                tag_parts.append(t.lower())
+            elif isinstance(t, dict):
+                tag_parts.append((t.get("label") or t.get("name") or t.get("slug") or "").lower())
+        tags = " ".join(tag_parts)
 
         text = f"{title} {description} {slug} {tags}"
 
