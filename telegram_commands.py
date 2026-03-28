@@ -37,23 +37,65 @@ def _is_private(update: Update) -> bool:
 
 # ── Юзерские команды (личка) ─────────────────────────────────
 
-def _main_menu_keyboard(is_connected: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню с кнопками"""
+STRATEGIES = {
+    "contrarian": {"name": "Контрарианская", "desc": "Покупка на просадках. Ищет панику и overreaction."},
+    "momentum": {"name": "Моментум", "desc": "Покупка растущих. Следует за трендом."},
+    "conservative": {"name": "Консервативная", "desc": "Только сильные сигналы с уверенностью 80%+."},
+}
+
+
+async def _build_main_menu(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Собрать главное меню с текущим статусом"""
+    db_user = await db.get_user_by_telegram_id(user_id)
+    is_connected = bool(db_user and db_user.get("api_key"))
+
+    if not is_connected:
+        text = (
+            "📊 <b>Polymarket Bot</b>\n\n"
+            "Подключи аккаунт чтобы начать торговлю.\n"
+            "Сигналы публикуются в канале автоматически."
+        )
+        buttons = [
+            [InlineKeyboardButton("🔗 Подключить Polymarket", callback_data="menu_connect")],
+            [InlineKeyboardButton("❓ Как это работает", callback_data="menu_help")],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    # Подключён — показываем статус
+    enabled = db_user.get("auto_trade", 0)
+    amount = db_user.get("auto_amount", 0.5)
+    max_daily = db_user.get("auto_max_daily", 5.0)
+    strategy = db_user.get("strategy", "contrarian")
+    strategy_name = STRATEGIES.get(strategy, {}).get("name", strategy)
+
+    stats = await db.get_user_portfolio_stats(db_user["id"])
+    open_pos = stats["open_positions"]
+    pnl = stats["realized_pnl"]
+    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+    wr = stats["win_rate"]
+
+    status_icon = "🟢" if enabled else "⏸"
+    status_text = "Активен" if enabled else "На паузе"
+
+    text = (
+        f"📊 <b>Polymarket Bot</b>\n\n"
+        f"{status_icon} Автоторговля: <b>{status_text}</b>\n"
+        f"📋 Стратегия: <b>{strategy_name}</b>\n"
+        f"💰 Ставка: <b>${amount:.2f}</b> | Лимит: <b>${max_daily:.0f}/день</b>\n\n"
+        f"📂 Позиций: <b>{open_pos}</b>\n"
+        f"{pnl_emoji} P&L: <b>${pnl:+.2f}</b> | Win rate: <b>{wr:.0f}%</b>"
+    )
+
+    toggle_text = "⏸ Остановить" if enabled else "▶️ Запустить"
+
     buttons = [
-        [InlineKeyboardButton("📊 Рынки", callback_data="menu_markets"),
-         InlineKeyboardButton("📋 Сигналы", callback_data="menu_signals")],
+        [InlineKeyboardButton(toggle_text, callback_data="autotrade_toggle")],
+        [InlineKeyboardButton("⚙️ Настройки", callback_data="menu_settings"),
+         InlineKeyboardButton("📂 Позиции", callback_data="menu_positions")],
+        [InlineKeyboardButton("🔌 Отключить аккаунт", callback_data="menu_disconnect")],
     ]
-    if is_connected:
-        buttons.append([
-            InlineKeyboardButton("💼 Портфель", callback_data="menu_portfolio"),
-            InlineKeyboardButton("📂 Позиции", callback_data="menu_positions"),
-        ])
-        buttons.append([InlineKeyboardButton("🤖 Автоставки", callback_data="menu_autotrade")])
-        buttons.append([InlineKeyboardButton("🔌 Отключить", callback_data="menu_disconnect")])
-    else:
-        buttons.append([InlineKeyboardButton("🔗 Подключить Polymarket", callback_data="menu_connect")])
-    buttons.append([InlineKeyboardButton("❓ Помощь", callback_data="menu_help")])
-    return InlineKeyboardMarkup(buttons)
+
+    return text, InlineKeyboardMarkup(buttons)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,16 +106,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await db.save_user(user.id, user.username or "")
 
-    db_user = await db.get_user_by_telegram_id(user.id)
-    is_connected = bool(db_user and db_user.get("api_key"))
-
-    text = (
-        f"👋 Привет, {user.first_name}!\n\n"
-        "Я бот для прогнозов на <b>Polymarket</b>.\n\n"
-        "📊 Сигналы публикуются в канале автоматически.\n"
-        "💰 Чтобы торговать — подключи свой Polymarket."
-    )
-    keyboard = _main_menu_keyboard(is_connected)
+    text, keyboard = await _build_main_menu(user.id)
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
@@ -86,40 +119,40 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
 
     try:
-        if data == "menu_markets" or data.startswith("markets_page_"):
-            page = int(data.split("_")[-1]) if data.startswith("markets_page_") else 0
-            await _show_markets(query, page)
-        elif data == "menu_portfolio":
-            await _show_portfolio(query)
-        elif data == "menu_signals":
-            await _show_signals(query)
+        if data == "menu_back":
+            text, kb = await _build_main_menu(user.id)
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        elif data == "menu_settings":
+            await _show_settings(query)
+        elif data == "menu_positions":
+            await _show_positions(query)
         elif data == "menu_help":
             await _show_help(query)
         elif data == "menu_connect":
             await query.edit_message_text(
-                "🔑 Для подключения отправь команду /connect",
+                "🔑 Отправь команду /connect для подключения",
                 parse_mode="HTML",
             )
         elif data == "menu_disconnect":
             await db.delete_user_api_keys(user.id)
             if _client:
                 _client.remove_user_client(user.id)
-            await query.edit_message_text(
-                "✅ Polymarket отключён.\n\nНажми /start для меню.",
-            )
-        elif data == "menu_autotrade":
-            await _show_autotrade(query)
+            text, kb = await _build_main_menu(user.id)
+            await query.edit_message_text("✅ Аккаунт отключён.\n\n" + text, parse_mode="HTML", reply_markup=kb)
         elif data == "autotrade_toggle":
             await _toggle_autotrade(query)
-        elif data.startswith("autotrade_amount_"):
+        elif data.startswith("set_amount_"):
             amount = float(data.split("_")[2])
-            await _set_autotrade_amount(query, amount)
-        elif data.startswith("autotrade_daily_"):
+            await db.set_auto_trade_settings(query.from_user.id, amount=amount)
+            await _show_settings(query)
+        elif data.startswith("set_daily_"):
             daily = float(data.split("_")[2])
-            await _set_autotrade_daily(query, daily)
-        elif data.startswith("autotrade_conf_"):
-            conf = float(data.split("_")[2]) / 100
-            await _set_autotrade_confidence(query, conf)
+            await db.set_auto_trade_settings(query.from_user.id, max_daily=daily)
+            await _show_settings(query)
+        elif data.startswith("set_strategy_"):
+            strategy = data.split("_")[2]
+            await db.set_user_strategy(query.from_user.id, strategy)
+            await _show_settings(query)
         elif data.startswith("market_"):
             market_id = int(data.split("_")[1])
             await _show_market_detail(query, market_id)
@@ -134,19 +167,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             market_id = int(parts[3])
             amount = float(parts[4])
             await _execute_trade(query, market_id, side, amount)
-        elif data == "menu_positions":
-            await _show_positions(query)
         elif data.startswith("close_pos_"):
             trade_id = int(data.split("_")[2])
             await _close_position(query, trade_id)
-        elif data == "menu_back":
-            db_user = await db.get_user_by_telegram_id(user.id)
-            is_connected = bool(db_user and db_user.get("api_key"))
-            await query.edit_message_text(
-                f"👋 {user.first_name}, выбери действие:",
-                parse_mode="HTML",
-                reply_markup=_main_menu_keyboard(is_connected),
-            )
     except Exception as e:
         logger.error(f"Ошибка callback {data}: {e}")
         await query.edit_message_text(f"❌ Ошибка: {e}\n\nНажми /start")
@@ -475,46 +498,45 @@ async def _show_signals(query):
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
 
 
-async def _show_autotrade(query):
-    """Настройки автоставок"""
+async def _show_settings(query):
+    """Настройки: стратегия, сумма, лимит"""
     user = await db.get_user_by_telegram_id(query.from_user.id)
     if not user or not user.get("api_key"):
         await query.edit_message_text("❌ Сначала подключи Polymarket.", reply_markup=_back_button())
         return
 
-    enabled = user.get("auto_trade", 0)
-    amount = user.get("auto_amount", 5.0)
-    max_daily = user.get("auto_max_daily", 50.0)
-    min_conf = user.get("auto_min_confidence", 0.6)
-
-    status = "🟢 ВКЛЮЧЕНЫ" if enabled else "🔴 ВЫКЛЮЧЕНЫ"
+    amount = user.get("auto_amount", 0.5)
+    max_daily = user.get("auto_max_daily", 5.0)
+    strategy = user.get("strategy", "contrarian")
+    strategy_info = STRATEGIES.get(strategy, {})
 
     text = (
-        f"🤖 <b>Автоставки</b>\n\n"
-        f"Статус: <b>{status}</b>\n"
-        f"💰 Сумма за ставку: <b>${amount:.0f}</b>\n"
-        f"📊 Лимит в день: <b>${max_daily:.0f}</b>\n"
-        f"🎯 Мин. уверенность: <b>{min_conf*100:.0f}%</b>\n\n"
-        f"Когда бот находит сигнал с уверенностью ≥ {min_conf*100:.0f}%, "
-        f"он автоматически ставит ${amount:.0f} от твоего имени."
+        f"⚙️ <b>Настройки</b>\n\n"
+        f"<b>Стратегия:</b> {strategy_info.get('name', strategy)}\n"
+        f"<i>{strategy_info.get('desc', '')}</i>\n\n"
+        f"<b>Сумма ставки:</b> ${amount:.2f}\n"
+        f"<b>Лимит в день:</b> ${max_daily:.0f}"
     )
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    # Кнопки стратегий
+    strat_buttons = []
+    for key, info in STRATEGIES.items():
+        mark = " ✓" if key == strategy else ""
+        strat_buttons.append(InlineKeyboardButton(
+            f"{info['name']}{mark}", callback_data=f"set_strategy_{key}"
+        ))
 
     buttons = [
-        [InlineKeyboardButton(toggle_text, callback_data="autotrade_toggle")],
-        [InlineKeyboardButton("$0.50", callback_data="autotrade_amount_0.5"),
-         InlineKeyboardButton("$1", callback_data="autotrade_amount_1"),
-         InlineKeyboardButton("$2", callback_data="autotrade_amount_2"),
-         InlineKeyboardButton("$5", callback_data="autotrade_amount_5"),
-         InlineKeyboardButton("$10", callback_data="autotrade_amount_10")],
-        [InlineKeyboardButton("Лимит $25", callback_data="autotrade_daily_25"),
-         InlineKeyboardButton("$50", callback_data="autotrade_daily_50"),
-         InlineKeyboardButton("$100", callback_data="autotrade_daily_100")],
-        [InlineKeyboardButton("Увер. 60%", callback_data="autotrade_conf_60"),
-         InlineKeyboardButton("70%", callback_data="autotrade_conf_70"),
-         InlineKeyboardButton("80%", callback_data="autotrade_conf_80")],
-        [InlineKeyboardButton("◀️ Меню", callback_data="menu_back")],
+        strat_buttons,
+        [InlineKeyboardButton("$0.50", callback_data="set_amount_0.5"),
+         InlineKeyboardButton("$1", callback_data="set_amount_1"),
+         InlineKeyboardButton("$2", callback_data="set_amount_2"),
+         InlineKeyboardButton("$5", callback_data="set_amount_5")],
+        [InlineKeyboardButton("Лимит $5", callback_data="set_daily_5"),
+         InlineKeyboardButton("$10", callback_data="set_daily_10"),
+         InlineKeyboardButton("$25", callback_data="set_daily_25"),
+         InlineKeyboardButton("$50", callback_data="set_daily_50")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="menu_back")],
     ]
 
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
@@ -526,34 +548,27 @@ async def _toggle_autotrade(query):
         return
     new_state = not bool(user.get("auto_trade", 0))
     await db.set_auto_trade(query.from_user.id, new_state)
-    await _show_autotrade(query)
-
-
-async def _set_autotrade_amount(query, amount: float):
-    await db.set_auto_trade_settings(query.from_user.id, amount=amount)
-    await _show_autotrade(query)
-
-
-async def _set_autotrade_daily(query, daily: float):
-    await db.set_auto_trade_settings(query.from_user.id, max_daily=daily)
-    await _show_autotrade(query)
-
-
-async def _set_autotrade_confidence(query, conf: float):
-    await db.set_auto_trade_settings(query.from_user.id, min_confidence=conf)
-    await _show_autotrade(query)
+    text, kb = await _build_main_menu(query.from_user.id)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def _show_help(query):
-    """Справка через кнопку"""
+    """Справка"""
     text = (
-        "📊 <b>Polymarket Bot</b>\n\n"
-        "<b>Команды:</b>\n"
-        "/connect — Подключить Polymarket API\n"
-        "/disconnect — Отключить аккаунт\n"
-        "/trade &lt;id&gt; &lt;YES/NO&gt; &lt;$&gt; — Ставка\n"
-        "/close &lt;trade_id&gt; — Закрыть позицию\n\n"
-        "Кнопки меню доступны через /start"
+        "❓ <b>Как это работает</b>\n\n"
+        "1️⃣ Подключи Polymarket аккаунт через /connect\n"
+        "2️⃣ Выбери стратегию и сумму ставки\n"
+        "3️⃣ Нажми ▶️ Запустить\n\n"
+        "Бот каждый час анализирует рынки и автоматически "
+        "размещает ставки по выбранной стратегии.\n\n"
+        "<b>Стратегии:</b>\n"
+        "• <b>Контрарианская</b> — покупка на просадках\n"
+        "• <b>Моментум</b> — покупка растущих\n"
+        "• <b>Консервативная</b> — только сильные сигналы\n\n"
+        "<b>Управление рисками:</b>\n"
+        "• Тейк-профит +15%\n"
+        "• Трейлинг-стоп при росте +25%\n"
+        "• Стоп-лосс -20%"
     )
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=_back_button())
 

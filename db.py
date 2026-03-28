@@ -76,9 +76,10 @@ async def init_db():
                 api_secret TEXT,
                 api_passphrase TEXT,
                 auto_trade INTEGER DEFAULT 0,
-                auto_amount REAL DEFAULT 5.0,
-                auto_max_daily REAL DEFAULT 50.0,
-                auto_min_confidence REAL DEFAULT 0.6,
+                auto_amount REAL DEFAULT 0.5,
+                auto_max_daily REAL DEFAULT 5.0,
+                auto_min_confidence REAL DEFAULT 0.7,
+                strategy TEXT DEFAULT 'contrarian',
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -176,6 +177,15 @@ async def set_auto_trade_settings(telegram_id: int, amount: float = None,
             await conn.execute("UPDATE users SET auto_max_daily = ? WHERE telegram_id = ?", (max_daily, telegram_id))
         if min_confidence is not None:
             await conn.execute("UPDATE users SET auto_min_confidence = ? WHERE telegram_id = ?", (min_confidence, telegram_id))
+        await conn.commit()
+
+
+async def set_user_strategy(telegram_id: int, strategy: str):
+    """Установить стратегию"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE users SET strategy = ? WHERE telegram_id = ?", (strategy, telegram_id),
+        )
         await conn.commit()
 
 
