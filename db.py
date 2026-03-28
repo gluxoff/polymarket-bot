@@ -60,6 +60,7 @@ async def init_db():
                 side TEXT NOT NULL,
                 size_usdc REAL NOT NULL,
                 price REAL NOT NULL,
+                max_price REAL DEFAULT 0,
                 order_id TEXT,
                 status TEXT DEFAULT 'pending',
                 pnl REAL DEFAULT 0,
@@ -386,18 +387,28 @@ async def save_trade(
 
 async def update_trade_status(trade_id: int, status: str, pnl: float = 0):
     """Обновить статус сделки"""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with aiosqlite.connect(config.DB_PATH) as conn:
         if status in ("closed", "resolved"):
-            await db.execute(
+            await conn.execute(
                 "UPDATE trades SET status=?, pnl=?, closed_at=CURRENT_TIMESTAMP WHERE id=?",
                 (status, pnl, trade_id),
             )
         else:
-            await db.execute(
+            await conn.execute(
                 "UPDATE trades SET status=?, pnl=? WHERE id=?",
                 (status, pnl, trade_id),
             )
-        await db.commit()
+        await conn.commit()
+
+
+async def update_trade_max_price(trade_id: int, max_price: float):
+    """Обновить максимальную цену (для трейлинг-стопа)"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE trades SET max_price=? WHERE id=? AND (max_price IS NULL OR max_price < ?)",
+            (max_price, trade_id, max_price),
+        )
+        await conn.commit()
 
 
 async def get_open_trades(user_id: int | None = None) -> list[dict]:
