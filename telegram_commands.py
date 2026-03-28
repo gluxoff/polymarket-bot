@@ -503,7 +503,8 @@ async def _show_autotrade(query):
 
     buttons = [
         [InlineKeyboardButton(toggle_text, callback_data="autotrade_toggle")],
-        [InlineKeyboardButton("$1", callback_data="autotrade_amount_1"),
+        [InlineKeyboardButton("$0.50", callback_data="autotrade_amount_0.5"),
+         InlineKeyboardButton("$1", callback_data="autotrade_amount_1"),
          InlineKeyboardButton("$2", callback_data="autotrade_amount_2"),
          InlineKeyboardButton("$5", callback_data="autotrade_amount_5"),
          InlineKeyboardButton("$10", callback_data="autotrade_amount_10")],
