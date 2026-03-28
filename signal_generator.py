@@ -1,4 +1,4 @@
-"""Генератор сигналов — создание торговых сигналов на основе аналитики"""
+"""Генератор сигналов v2 — только качественные BUY сигналы"""
 
 import aiohttp
 from loguru import logger
@@ -7,6 +7,21 @@ import config
 import db
 from analytics_engine import AnalyticsEngine
 
+# Мусорные паттерны — рынки которые не имеют смысла для торговли
+TRASH_PATTERNS = [
+    "will trump say", "will biden say", "will elon say",
+    "will mrbeast say", "said during",
+    "say \"", "say '",
+    "during the next episode",
+    "during his next video",
+    "during the fii", "during the press conference",
+    "at the rally",
+    "highest temperature", "lowest temperature",
+    "weather",
+]
+
+MAX_SIGNALS_PER_CYCLE = 5
+
 
 class SignalGenerator:
     def __init__(self, analytics: AnalyticsEngine):
@@ -14,163 +29,200 @@ class SignalGenerator:
 
     async def generate_signals(self) -> list[dict]:
         """
-        Основной pipeline генерации сигналов:
-        1. Обнаружение значимых движений
-        2. Оценка уверенности
-        3. Опциональный GPT-анализ
-        4. Сохранение в БД
+        Стратегия v2:
+        - Только BUY (покупаем дешёво, получаем $1 при исполнении)
+        - Цена 15-70% (есть потенциал роста 30%+)
+        - Фильтр мусорных рынков
+        - Макс 5 лучших за цикл
         """
         movements = await self.analytics.detect_significant_movements()
         if not movements:
             return []
 
-        signals = []
+        candidates = []
         for item in movements:
             market = item["market"]
             analysis = item["analysis"]
             reasons = item["reasons"]
 
-            # Определяем направление
+            question = market.get("question", "").lower()
+            price = analysis["current_price"]
             change_1h = analysis["change_1h"]
-            direction = "BUY" if change_1h > 0 else "SELL"
 
-            # Определяем тип сигнала (приоритет)
-            if "probability_shift" in reasons:
-                signal_type = "probability_shift"
-            elif "volume_spike" in reasons:
-                signal_type = "volume_spike"
-            else:
-                signal_type = "high_momentum"
+            # === ФИЛЬТРЫ ===
 
-            # Считаем уверенность
-            confidence = self._calculate_confidence(analysis, reasons)
+            # Только растущие (BUY)
+            if change_1h <= 0:
+                continue
 
-            # Пропускаем слабые сигналы
+            # Цена 15-70% — есть куда расти
+            if price < 0.15 or price > 0.70:
+                continue
+
+            # Потенциальный профит минимум 30%
+            potential_profit = (1.0 - price) / price
+            if potential_profit < 0.30:
+                continue
+
+            # Фильтр мусора
+            if self._is_trash_market(question):
+                continue
+
+            # === SCORING ===
+            confidence = self._calculate_confidence(analysis, reasons, potential_profit)
+
             if confidence < 0.5:
                 continue
 
-            # GPT-анализ (опционально)
-            reasoning = self._build_reasoning(analysis, reasons)
-            if config.OPENAI_API_KEY:
-                gpt_reasoning = await self._gpt_analyze(market, analysis)
-                if gpt_reasoning:
-                    reasoning = gpt_reasoning
-                    signal_type = "gpt_analysis"
+            reasoning = self._build_reasoning(analysis, reasons, potential_profit)
 
-            # Сохраняем сигнал
+            # GPT (опционально)
+            if config.OPENAI_API_KEY:
+                gpt = await self._gpt_analyze(market, analysis)
+                if gpt:
+                    reasoning = gpt
+
+            signal_type = "probability_shift"
+            if "volume_spike" in reasons:
+                signal_type = "volume_spike"
+
+            candidates.append({
+                "market": market,
+                "analysis": analysis,
+                "confidence": confidence,
+                "signal_type": signal_type,
+                "reasoning": reasoning,
+                "potential_profit": potential_profit,
+            })
+
+        # Сортируем: сначала по потенциальному профиту * уверенность
+        candidates.sort(key=lambda c: c["confidence"] * c["potential_profit"], reverse=True)
+        candidates = candidates[:MAX_SIGNALS_PER_CYCLE]
+
+        # Сохраняем в БД
+        signals = []
+        for c in candidates:
+            market = c["market"]
+            analysis = c["analysis"]
+
             signal_id = await db.save_signal(
                 market_id=market["id"],
-                signal_type=signal_type,
-                direction=direction,
-                confidence=confidence,
+                signal_type=c["signal_type"],
+                direction="BUY",
+                confidence=c["confidence"],
                 probability_at_signal=analysis["current_price"],
-                probability_change=change_1h,
-                reasoning=reasoning,
+                probability_change=analysis["change_1h"],
+                reasoning=c["reasoning"],
             )
 
-            signal_data = {
+            signals.append({
                 "id": signal_id,
                 "market_id": market["id"],
                 "question": market["question"],
                 "category": market.get("category", ""),
                 "polymarket_url": market.get("polymarket_url", ""),
-                "signal_type": signal_type,
-                "direction": direction,
-                "confidence": confidence,
+                "signal_type": c["signal_type"],
+                "direction": "BUY",
+                "confidence": c["confidence"],
                 "probability_at_signal": analysis["current_price"],
-                "probability_change": change_1h,
-                "reasoning": reasoning,
+                "probability_change": analysis["change_1h"],
+                "reasoning": c["reasoning"],
                 "token_id_yes": market.get("token_id_yes", ""),
                 "token_id_no": market.get("token_id_no", ""),
-            }
-            signals.append(signal_data)
-            logger.info(
-                f"Сигнал: {direction} '{market['question'][:50]}...' "
-                f"(conf={confidence:.2f}, type={signal_type})"
-            )
+            })
 
-        # Сортируем по уверенности и берём топ-10
-        signals.sort(key=lambda s: s["confidence"], reverse=True)
-        signals = signals[:10]
+            profit_pct = c["potential_profit"] * 100
+            logger.info(
+                f"Сигнал: BUY '{market['question'][:50]}...' "
+                f"@ {analysis['current_price']*100:.0f}% "
+                f"(conf={c['confidence']:.2f}, profit={profit_pct:.0f}%)"
+            )
 
         return signals
 
-    def _calculate_confidence(self, analysis: dict, reasons: list[str]) -> float:
-        """Расчёт уверенности 0-1 на основе анализа"""
+    def _is_trash_market(self, question: str) -> bool:
+        """Проверить является ли рынок мусорным"""
+        for pattern in TRASH_PATTERNS:
+            if pattern in question:
+                return True
+        return False
+
+    def _calculate_confidence(self, analysis: dict, reasons: list[str],
+                               potential_profit: float) -> float:
+        """Расчёт уверенности с учётом потенциала"""
         score = 0.0
 
-        # Сила сдвига вероятности (основной фактор)
-        shift = abs(analysis["change_1h"])
-        if shift >= 0.10:
-            score += 0.4
-        elif shift >= 0.05:
+        # Сила сдвига (растёт — хорошо)
+        shift = analysis["change_1h"]
+        if shift >= 0.15:
+            score += 0.30
+        elif shift >= 0.10:
             score += 0.25
-        elif shift >= 0.03:
-            score += 0.1
-
-        # Согласованность трендов (1ч и 6ч в одном направлении)
-        if analysis["change_1h"] * analysis["change_6h"] > 0:
+        elif shift >= 0.08:
             score += 0.15
 
-        # Моментум
-        if abs(analysis["momentum"]) >= 0.02:
+        # Согласованность: 1ч и 6ч оба вверх
+        if analysis["change_1h"] > 0 and analysis["change_6h"] > 0:
             score += 0.15
-        elif abs(analysis["momentum"]) >= 0.01:
+
+        # 24ч тренд тоже вверх — сильный сигнал
+        if analysis["change_24h"] > 0 and analysis["change_1h"] > 0:
+            score += 0.10
+
+        # Моментум (ускорение)
+        if analysis["momentum"] >= 0.02:
+            score += 0.15
+        elif analysis["momentum"] >= 0.01:
             score += 0.08
 
         # Объём
         if analysis["volume_ratio"] >= 3.0:
             score += 0.15
         elif analysis["volume_ratio"] >= 2.0:
-            score += 0.1
+            score += 0.10
 
-        # Количество причин
-        if len(reasons) >= 3:
+        # Потенциальный профит бонус
+        if potential_profit >= 2.0:  # 200%+
             score += 0.15
-        elif len(reasons) >= 2:
-            score += 0.1
+        elif potential_profit >= 1.0:  # 100%+
+            score += 0.10
+        elif potential_profit >= 0.5:  # 50%+
+            score += 0.05
 
         return min(score, 1.0)
 
-    def _build_reasoning(self, analysis: dict, reasons: list[str]) -> str:
-        """Сформировать текстовое обоснование сигнала"""
+    def _build_reasoning(self, analysis: dict, reasons: list[str],
+                          potential_profit: float) -> str:
         parts = []
 
         change_1h = analysis["change_1h"] * 100
-        change_6h = analysis["change_6h"] * 100
-
-        if "probability_shift" in reasons:
-            parts.append(f"Probability shifted {change_1h:+.1f}% in 1h")
+        parts.append(f"+{change_1h:.1f}% in 1h")
 
         if "volume_spike" in reasons:
-            parts.append(f"Volume {analysis['volume_ratio']:.1f}x above average")
+            parts.append(f"volume {analysis['volume_ratio']:.1f}x avg")
 
-        if "high_momentum" in reasons:
-            parts.append(f"Strong momentum detected")
+        if analysis["change_6h"] > 0:
+            parts.append(f"6h trend +{analysis['change_6h']*100:.1f}%")
 
-        if abs(change_6h) > abs(change_1h):
-            parts.append(f"6h trend: {change_6h:+.1f}%")
+        parts.append(f"potential profit {potential_profit*100:.0f}%")
 
-        return ". ".join(parts)
+        return " | ".join(parts)
 
     async def _gpt_analyze(self, market: dict, analysis: dict) -> str | None:
-        """GPT-анализ контекста рынка"""
         if not config.OPENAI_API_KEY:
             return None
 
         question = market.get("question", "")
         current = analysis["current_price"] * 100
         change_1h = analysis["change_1h"] * 100
-        change_24h = analysis["change_24h"] * 100
+        profit = ((1.0 - analysis["current_price"]) / analysis["current_price"]) * 100
 
         prompt = (
-            f"You are a prediction market analyst. Briefly analyze this Polymarket event "
-            f"(max 2 sentences):\n\n"
-            f"Question: {question}\n"
-            f"Current probability: {current:.0f}%\n"
-            f"Change 1h: {change_1h:+.1f}%\n"
-            f"Change 24h: {change_24h:+.1f}%\n\n"
-            f"Why might the probability be moving? Is this a good entry point?"
+            f"Prediction market analyst. 1-2 sentences max.\n\n"
+            f"Market: {question}\n"
+            f"Price: {current:.0f}% (up {change_1h:.0f}% in 1h)\n"
+            f"Potential profit if YES: {profit:.0f}%\n\n"
+            f"Is this a good BUY opportunity? Why is probability rising?"
         )
 
         try:
@@ -184,16 +236,15 @@ class SignalGenerator:
                     json={
                         "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 150,
-                        "temperature": 0.7,
+                        "max_tokens": 100,
+                        "temperature": 0.5,
                     },
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return data["choices"][0]["message"]["content"].strip()
-                    logger.warning(f"GPT API: HTTP {resp.status}")
                     return None
         except Exception as e:
-            logger.warning(f"GPT анализ недоступен: {e}")
+            logger.warning(f"GPT недоступен: {e}")
             return None
