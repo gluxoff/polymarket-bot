@@ -111,14 +111,20 @@ class TelegramPublisher:
             "volume_spike": "Volume Spike",
             "value_bet": "Value Bet",
             "gpt_analysis": "AI Analysis",
+            "contrarian_dip": "Dip Buy",
+            "contrarian_volume": "Dip Buy + Volume",
         }
         type_text = type_labels.get(signal_type, signal_type)
+
+        # Потенциальный профит
+        potential = ((1.0 - prob) / prob * 100) if prob > 0 else 0
 
         text = (
             f"📊 <b>Polymarket Signal</b>\n\n"
             f"❓ <b>{question}</b>\n"
             f"{trend}\n\n"
-            f"💡 <b>{direction} YES</b> @ {prob:.2f}\n"
+            f"💡 <b>BUY YES</b> @ {prob:.2f}\n"
+            f"💰 Potential profit: <b>+{potential:.0f}%</b>\n"
             f"🎯 Confidence: <b>{conf_text}</b> ({confidence:.2f})\n"
             f"📋 Type: {type_text}\n"
         )

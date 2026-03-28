@@ -1,4 +1,4 @@
-"""Генератор сигналов v2 — только качественные BUY сигналы"""
+"""Генератор сигналов v3 — контрарианская стратегия (покупай после падения)"""
 
 import aiohttp
 from loguru import logger
@@ -7,17 +7,14 @@ import config
 import db
 from analytics_engine import AnalyticsEngine
 
-# Мусорные паттерны — рынки которые не имеют смысла для торговли
 TRASH_PATTERNS = [
     "will trump say", "will biden say", "will elon say",
     "will mrbeast say", "said during",
-    "say \"", "say '",
-    "during the next episode",
-    "during his next video",
+    'say "', "say '",
+    "during the next episode", "during his next video",
     "during the fii", "during the press conference",
     "at the rally",
-    "highest temperature", "lowest temperature",
-    "weather",
+    "highest temperature", "lowest temperature", "weather",
 ]
 
 MAX_SIGNALS_PER_CYCLE = 5
@@ -29,10 +26,11 @@ class SignalGenerator:
 
     async def generate_signals(self) -> list[dict]:
         """
-        Стратегия v2:
-        - Только BUY (покупаем дешёво, получаем $1 при исполнении)
-        - Цена 15-70% (есть потенциал роста 30%+)
-        - Фильтр мусорных рынков
+        Контрарианская стратегия:
+        - Цена резко упала (>8% за час) — паника/overreaction
+        - Цена в диапазоне 20-65% — есть потенциал отскока
+        - Покупаем YES дёшево, ждём восстановления
+        - Без мусорных рынков
         - Макс 5 лучших за цикл
         """
         movements = await self.analytics.detect_significant_movements()
@@ -45,36 +43,38 @@ class SignalGenerator:
             analysis = item["analysis"]
             reasons = item["reasons"]
 
-            question = market.get("question", "").lower()
+            question = market.get("question", "")
             price = analysis["current_price"]
             change_1h = analysis["change_1h"]
 
             # === ФИЛЬТРЫ ===
 
-            # Только растущие (BUY)
-            if change_1h <= 0:
+            # Только ПАДАЮЩИЕ — контрарианская логика
+            if change_1h >= 0:
                 continue
 
-            # Цена 15-70% — есть куда расти
-            if price < 0.15 or price > 0.70:
+            # Падение минимум 8%
+            if abs(change_1h) < 0.08:
                 continue
 
-            # Потенциальный профит минимум 30%
-            potential_profit = (1.0 - price) / price
-            if potential_profit < 0.30:
+            # Цена 20-65% — не слишком дешёвая (мусор) и не дорогая
+            if price < 0.20 or price > 0.65:
                 continue
 
             # Фильтр мусора
-            if self._is_trash_market(question):
+            if self._is_trash_market(question.lower()):
                 continue
+
+            # Потенциальный профит
+            potential_profit = (1.0 - price) / price
 
             # === SCORING ===
             confidence = self._calculate_confidence(analysis, reasons, potential_profit)
 
-            if confidence < 0.5:
+            if confidence < 0.45:
                 continue
 
-            reasoning = self._build_reasoning(analysis, reasons, potential_profit)
+            reasoning = self._build_reasoning(analysis, potential_profit)
 
             # GPT (опционально)
             if config.OPENAI_API_KEY:
@@ -82,9 +82,9 @@ class SignalGenerator:
                 if gpt:
                     reasoning = gpt
 
-            signal_type = "probability_shift"
+            signal_type = "contrarian_dip"
             if "volume_spike" in reasons:
-                signal_type = "volume_spike"
+                signal_type = "contrarian_volume"
 
             candidates.append({
                 "market": market,
@@ -93,13 +93,17 @@ class SignalGenerator:
                 "signal_type": signal_type,
                 "reasoning": reasoning,
                 "potential_profit": potential_profit,
+                "drop_size": abs(change_1h),
             })
 
-        # Сортируем: сначала по потенциальному профиту * уверенность
-        candidates.sort(key=lambda c: c["confidence"] * c["potential_profit"], reverse=True)
+        # Сортируем: сильнейшее падение * потенциал * уверенность
+        candidates.sort(
+            key=lambda c: c["drop_size"] * c["potential_profit"] * c["confidence"],
+            reverse=True,
+        )
         candidates = candidates[:MAX_SIGNALS_PER_CYCLE]
 
-        # Сохраняем в БД
+        # Сохраняем
         signals = []
         for c in candidates:
             market = c["market"]
@@ -131,78 +135,71 @@ class SignalGenerator:
                 "token_id_no": market.get("token_id_no", ""),
             })
 
-            profit_pct = c["potential_profit"] * 100
             logger.info(
                 f"Сигнал: BUY '{market['question'][:50]}...' "
                 f"@ {analysis['current_price']*100:.0f}% "
-                f"(conf={c['confidence']:.2f}, profit={profit_pct:.0f}%)"
+                f"(drop {c['drop_size']*100:.0f}%, profit pot. {c['potential_profit']*100:.0f}%)"
             )
 
         return signals
 
     def _is_trash_market(self, question: str) -> bool:
-        """Проверить является ли рынок мусорным"""
-        for pattern in TRASH_PATTERNS:
-            if pattern in question:
-                return True
-        return False
+        return any(p in question for p in TRASH_PATTERNS)
 
     def _calculate_confidence(self, analysis: dict, reasons: list[str],
                                potential_profit: float) -> float:
-        """Расчёт уверенности с учётом потенциала"""
         score = 0.0
 
-        # Сила сдвига (растёт — хорошо)
-        shift = analysis["change_1h"]
-        if shift >= 0.15:
+        # Сила падения (чем больше упало — тем вероятнее отскок)
+        drop = abs(analysis["change_1h"])
+        if drop >= 0.20:
             score += 0.30
-        elif shift >= 0.10:
+        elif drop >= 0.15:
             score += 0.25
-        elif shift >= 0.08:
-            score += 0.15
-
-        # Согласованность: 1ч и 6ч оба вверх
-        if analysis["change_1h"] > 0 and analysis["change_6h"] > 0:
-            score += 0.15
-
-        # 24ч тренд тоже вверх — сильный сигнал
-        if analysis["change_24h"] > 0 and analysis["change_1h"] > 0:
+        elif drop >= 0.10:
+            score += 0.20
+        elif drop >= 0.08:
             score += 0.10
 
-        # Моментум (ускорение)
-        if analysis["momentum"] >= 0.02:
-            score += 0.15
-        elif analysis["momentum"] >= 0.01:
-            score += 0.08
+        # 6ч тренд был ВВЕРХ до этого (значит падение — откат, не тренд)
+        if analysis["change_6h"] > 0 and analysis["change_1h"] < 0:
+            score += 0.20  # Был рост, потом резкое падение — хороший знак
 
-        # Объём
+        # 24ч тренд вверх — ещё лучше
+        if analysis["change_24h"] > 0:
+            score += 0.10
+
+        # Объём (высокий объём при падении = паника = отскок вероятнее)
         if analysis["volume_ratio"] >= 3.0:
             score += 0.15
         elif analysis["volume_ratio"] >= 2.0:
             score += 0.10
 
-        # Потенциальный профит бонус
-        if potential_profit >= 2.0:  # 200%+
+        # Потенциальный профит
+        if potential_profit >= 2.0:
             score += 0.15
-        elif potential_profit >= 1.0:  # 100%+
+        elif potential_profit >= 1.0:
             score += 0.10
-        elif potential_profit >= 0.5:  # 50%+
+        elif potential_profit >= 0.5:
             score += 0.05
+
+        # Несколько причин
+        if len(reasons) >= 2:
+            score += 0.10
 
         return min(score, 1.0)
 
-    def _build_reasoning(self, analysis: dict, reasons: list[str],
-                          potential_profit: float) -> str:
+    def _build_reasoning(self, analysis: dict, potential_profit: float) -> str:
         parts = []
 
-        change_1h = analysis["change_1h"] * 100
-        parts.append(f"+{change_1h:.1f}% in 1h")
-
-        if "volume_spike" in reasons:
-            parts.append(f"volume {analysis['volume_ratio']:.1f}x avg")
+        drop = abs(analysis["change_1h"]) * 100
+        parts.append(f"Dropped {drop:.0f}% in 1h — potential overreaction")
 
         if analysis["change_6h"] > 0:
-            parts.append(f"6h trend +{analysis['change_6h']*100:.1f}%")
+            parts.append(f"was rising before (+{analysis['change_6h']*100:.0f}% in 6h)")
+
+        if analysis["volume_ratio"] >= 2.0:
+            parts.append(f"volume {analysis['volume_ratio']:.1f}x avg")
 
         parts.append(f"potential profit {potential_profit*100:.0f}%")
 
@@ -213,16 +210,16 @@ class SignalGenerator:
             return None
 
         question = market.get("question", "")
-        current = analysis["current_price"] * 100
-        change_1h = analysis["change_1h"] * 100
+        price = analysis["current_price"] * 100
+        drop = abs(analysis["change_1h"]) * 100
         profit = ((1.0 - analysis["current_price"]) / analysis["current_price"]) * 100
 
         prompt = (
-            f"Prediction market analyst. 1-2 sentences max.\n\n"
+            f"Prediction market. 1-2 sentences.\n\n"
             f"Market: {question}\n"
-            f"Price: {current:.0f}% (up {change_1h:.0f}% in 1h)\n"
+            f"Price dropped to {price:.0f}% (down {drop:.0f}% in 1h)\n"
             f"Potential profit if YES: {profit:.0f}%\n\n"
-            f"Is this a good BUY opportunity? Why is probability rising?"
+            f"Is this an overreaction? Good dip-buy opportunity?"
         )
 
         try:
@@ -245,6 +242,5 @@ class SignalGenerator:
                         data = await resp.json()
                         return data["choices"][0]["message"]["content"].strip()
                     return None
-        except Exception as e:
-            logger.warning(f"GPT недоступен: {e}")
+        except Exception:
             return None
