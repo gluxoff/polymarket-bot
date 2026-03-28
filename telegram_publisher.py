@@ -107,12 +107,12 @@ class TelegramPublisher:
 
         signal_type = signal.get("signal_type", "")
         type_labels = {
-            "probability_shift": "Probability Shift",
-            "volume_spike": "Volume Spike",
-            "value_bet": "Value Bet",
-            "gpt_analysis": "AI Analysis",
-            "contrarian_dip": "Dip Buy",
-            "contrarian_volume": "Dip Buy + Volume",
+            "probability_shift": "Сдвиг вероятности",
+            "volume_spike": "Всплеск объёма",
+            "value_bet": "Выгодная ставка",
+            "gpt_analysis": "AI-анализ",
+            "contrarian_dip": "Покупка на просадке",
+            "contrarian_volume": "Просадка + объём",
         }
         type_text = type_labels.get(signal_type, signal_type)
 
@@ -120,13 +120,13 @@ class TelegramPublisher:
         potential = ((1.0 - prob) / prob * 100) if prob > 0 else 0
 
         text = (
-            f"📊 <b>Polymarket Signal</b>\n\n"
+            f"📊 <b>Сигнал Polymarket</b>\n\n"
             f"❓ <b>{question}</b>\n"
             f"{trend}\n\n"
             f"💡 <b>BUY YES</b> @ {prob:.2f}\n"
-            f"💰 Potential profit: <b>+{potential:.0f}%</b>\n"
-            f"🎯 Confidence: <b>{conf_text}</b> ({confidence:.2f})\n"
-            f"📋 Type: {type_text}\n"
+            f"💰 Потенциальная прибыль: <b>+{potential:.0f}%</b>\n"
+            f"🎯 Уверенность: <b>{conf_text}</b> ({confidence:.2f})\n"
+            f"📋 Тип: {type_text}\n"
         )
 
         if reasoning:
@@ -141,13 +141,13 @@ class TelegramPublisher:
         if chart_path:
             if url:
                 msg_id = await self.send_photo_with_button(
-                    chart_path, text, "Open on Polymarket", url
+                    chart_path, text, "Открыть на Polymarket", url
                 )
             else:
                 msg_id = await self.send_photo(chart_path, caption=text)
         else:
             if url:
-                msg_id = await self.send_text_with_button(text, "Open on Polymarket", url)
+                msg_id = await self.send_text_with_button(text, "Открыть на Polymarket", url)
             else:
                 msg_id = await self.send_text(text)
 
@@ -187,14 +187,14 @@ class TelegramPublisher:
         pnl_emoji = "🟢" if pnl >= 0 else "🔴"
 
         text = (
-            f"📊 <b>Daily Summary</b>\n\n"
-            f"📡 Markets tracked: {markets}\n"
-            f"📋 Signals generated: {signals_today}\n"
-            f"💰 Trades executed: {trades_today}\n\n"
+            f"📊 <b>Дневной отчёт</b>\n\n"
+            f"📡 Рынков отслеживается: {markets}\n"
+            f"📋 Сигналов сгенерировано: {signals_today}\n"
+            f"💰 Сделок выполнено: {trades_today}\n\n"
             f"{pnl_emoji} <b>P&L: ${pnl:+.2f}</b>\n"
-            f"✅ Wins: {wins} | ❌ Losses: {losses}\n"
-            f"📊 Win rate: {win_rate:.0f}%\n"
-            f"📂 Open positions: {open_pos}\n"
+            f"✅ Побед: {wins} | ❌ Убытков: {losses}\n"
+            f"📊 Процент побед: {win_rate:.0f}%\n"
+            f"📂 Открытых позиций: {open_pos}\n"
         )
         return await self.send_text(text)
 
@@ -210,9 +210,9 @@ class TelegramPublisher:
         pnl_emoji = "🟢" if realized >= 0 else "🔴"
 
         text = (
-            f"💼 <b>Portfolio Update</b>\n\n"
-            f"{pnl_emoji} Realized P&L: <b>${realized:+.2f}</b>\n"
-            f"📂 Open: {open_pos} (${invested:.2f} invested)\n"
+            f"💼 <b>Обновление портфеля</b>\n\n"
+            f"{pnl_emoji} Реализованный P&L: <b>${realized:+.2f}</b>\n"
+            f"📂 Открыто: {open_pos} (${invested:.2f} вложено)\n"
             f"✅ {wins}W / ❌ {losses}L ({win_rate:.0f}%)\n"
         )
         return await self.send_text(text)

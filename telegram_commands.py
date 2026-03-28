@@ -507,10 +507,10 @@ async def _show_autotrade(query):
          InlineKeyboardButton("$2", callback_data="autotrade_amount_2"),
          InlineKeyboardButton("$5", callback_data="autotrade_amount_5"),
          InlineKeyboardButton("$10", callback_data="autotrade_amount_10")],
-        [InlineKeyboardButton("Daily $25", callback_data="autotrade_daily_25"),
+        [InlineKeyboardButton("Лимит $25", callback_data="autotrade_daily_25"),
          InlineKeyboardButton("$50", callback_data="autotrade_daily_50"),
          InlineKeyboardButton("$100", callback_data="autotrade_daily_100")],
-        [InlineKeyboardButton("Conf 60%", callback_data="autotrade_conf_60"),
+        [InlineKeyboardButton("Увер. 60%", callback_data="autotrade_conf_60"),
          InlineKeyboardButton("70%", callback_data="autotrade_conf_70"),
          InlineKeyboardButton("80%", callback_data="autotrade_conf_80")],
         [InlineKeyboardButton("◀️ Меню", callback_data="menu_back")],
@@ -920,16 +920,16 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     next_runs = _scheduler.get_next_run_times() if _scheduler else {}
     next_scan = next_runs.get("market_scan", "N/A")
-    paused = "⏸ PAUSED" if (_scheduler and _scheduler.is_paused) else "▶️ Active"
+    paused = "⏸ ПАУЗА" if (_scheduler and _scheduler.is_paused) else "▶️ Активен"
 
     text = (
-        f"📊 <b>Bot Status</b>\n\n"
-        f"Status: {paused}\n"
-        f"👥 Users connected: {len(users)}\n"
-        f"📡 Markets: {len(markets)}\n"
-        f"📂 Open trades (all): {portfolio['open_positions']}\n"
-        f"💰 Total P&L: ${portfolio['realized_pnl']:+.2f}\n"
-        f"⏰ Next scan: {next_scan}\n"
+        f"📊 <b>Статус бота</b>\n\n"
+        f"Статус: {paused}\n"
+        f"👥 Подключённых юзеров: {len(users)}\n"
+        f"📡 Рынков: {len(markets)}\n"
+        f"📂 Открытых сделок (все): {portfolio['open_positions']}\n"
+        f"💰 Общий P&L: ${portfolio['realized_pnl']:+.2f}\n"
+        f"⏰ Следующее сканирование: {next_scan}\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -940,10 +940,10 @@ async def cmd_signals(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     signals = await db.get_recent_signals(10)
     if not signals:
-        await update.message.reply_text("Нет сигналов")
+        await update.message.reply_text("Нет сигналов.")
         return
 
-    lines = ["📋 <b>Recent Signals</b>\n"]
+    lines = ["📋 <b>Последние сигналы</b>\n"]
     for s in signals:
         q = s["question"][:50] + ("..." if len(s["question"]) > 50 else "")
         change = s.get("probability_change", 0) * 100

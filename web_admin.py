@@ -157,11 +157,11 @@ async def setup_page(request):
     token = request.query.get("token", "")
     settings = config.get_all_settings()
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Polymarket Bot — Setup</title>
+<title>Polymarket Bot — Настройка</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -197,27 +197,27 @@ input:focus {{ outline: none; border-color: #4A90D9; }}
 <input id="bot_token" type="text" placeholder="123456:ABC-DEF..." value="{settings.get('telegram_bot_token', '')}">
 <div class="hint">Получи у @BotFather в Telegram</div>
 
-<label>Channel ID</label>
+<label>ID канала</label>
 <input id="channel_id" type="text" placeholder="-100xxxxxxxxxx" value="{settings.get('telegram_channel_id', '')}">
 <div class="hint">ID канала для публикации сигналов (опционально)</div>
 
-<label>Admin Telegram ID</label>
+<label>Telegram ID админа</label>
 <input id="admin_id" type="text" placeholder="123456789" value="{settings.get('admin_telegram_id', 0) or ''}">
 <div class="hint">Твой ID. Узнай у @userinfobot</div>
 </div>
 
 <div class="card">
 <h2>Параметры</h2>
-<label>Scan Interval (min)</label>
+<label>Интервал сканирования (мин)</label>
 <input id="scan_interval" type="number" value="{settings.get('scan_interval_minutes', 10)}">
 
-<label>Analysis Interval (min)</label>
+<label>Интервал анализа (мин)</label>
 <input id="analysis_interval" type="number" value="{settings.get('deep_analysis_interval_minutes', 60)}">
 
-<label>Max Bet Size (USDC)</label>
+<label>Макс. ставка (USDC)</label>
 <input id="max_bet" type="number" step="0.01" value="{settings.get('max_bet_size_usdc', 10)}">
 
-<label>Max Daily Loss (USDC)</label>
+<label>Макс. дневной убыток (USDC)</label>
 <input id="max_loss" type="number" step="0.01" value="{settings.get('max_daily_loss_usdc', 50)}">
 </div>
 
@@ -269,11 +269,11 @@ async function saveSettings() {{
 async def index_page(request):
     token = request.query.get("token", "")
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Polymarket Bot Admin</title>
+<title>Polymarket Bot — Панель управления</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -318,29 +318,29 @@ input:focus {{ outline: none; border-color: #4A90D9; }}
 <h1>📊 Polymarket Bot</h1>
 
 <div class="tabs">
-    <div class="tab active" onclick="showTab('dashboard')">Dashboard</div>
-    <div class="tab" onclick="showTab('settings')">Settings</div>
+    <div class="tab active" onclick="showTab('dashboard')">Обзор</div>
+    <div class="tab" onclick="showTab('settings')">Настройки</div>
 </div>
 
-<div id="loading">Loading...</div>
+<div id="loading">Загрузка...</div>
 
 <!-- Dashboard -->
 <div id="tab-dashboard" class="panel active">
 <div class="card" id="portfolio-card"></div>
 <div style="margin-bottom:16px">
-    <button class="btn" onclick="refresh()">🔄 Refresh</button>
+    <button class="btn" onclick="refresh()">🔄 Обновить</button>
 </div>
-<h2>Markets</h2>
+<h2>Рынки</h2>
 <div class="card"><table id="markets-table"><thead>
-    <tr><th>#</th><th>Question</th><th>Category</th><th>YES</th><th>Updated</th></tr>
+    <tr><th>#</th><th>Вопрос</th><th>Категория</th><th>YES</th><th>Обновлено</th></tr>
 </thead><tbody></tbody></table></div>
-<h2>Signals</h2>
+<h2>Сигналы</h2>
 <div class="card"><table id="signals-table"><thead>
-    <tr><th>Time</th><th>Question</th><th>Dir</th><th>Conf</th><th>Type</th></tr>
+    <tr><th>Время</th><th>Вопрос</th><th>Напр.</th><th>Увер.</th><th>Тип</th></tr>
 </thead><tbody></tbody></table></div>
-<h2>Trades</h2>
+<h2>Сделки</h2>
 <div class="card"><table id="trades-table"><thead>
-    <tr><th>Time</th><th>Question</th><th>Side</th><th>Size</th><th>Price</th><th>P&L</th><th>Status</th><th></th></tr>
+    <tr><th>Время</th><th>Вопрос</th><th>Сторона</th><th>Сумма</th><th>Цена</th><th>P&L</th><th>Статус</th><th></th></tr>
 </thead><tbody></tbody></table></div>
 </div>
 
@@ -348,30 +348,30 @@ input:focus {{ outline: none; border-color: #4A90D9; }}
 <div id="tab-settings" class="panel">
 <div class="card">
 <h2>Telegram</h2>
-<label>Bot Token</label>
+<label>Токен бота</label>
 <input id="s_bot_token" type="text" placeholder="123456:ABC-DEF...">
-<label>Channel ID</label>
+<label>ID канала</label>
 <input id="s_channel_id" type="text" placeholder="-100xxxxxxxxxx">
-<label>Admin Telegram ID</label>
+<label>Telegram ID админа</label>
 <input id="s_admin_id" type="text" placeholder="123456789">
 </div>
 <div class="card">
-<h2>Parameters</h2>
-<label>Scan Interval (min)</label>
+<h2>Параметры</h2>
+<label>Интервал сканирования (мин)</label>
 <input id="s_scan" type="number">
-<label>Analysis Interval (min)</label>
+<label>Интервал анализа (мин)</label>
 <input id="s_analysis" type="number">
-<label>Max Bet Size (USDC)</label>
+<label>Макс. ставка (USDC)</label>
 <input id="s_max_bet" type="number" step="0.01">
-<label>Max Daily Loss (USDC)</label>
+<label>Макс. дневной убыток (USDC)</label>
 <input id="s_max_loss" type="number" step="0.01">
-<label>Probability Shift Threshold</label>
+<label>Порог сдвига вероятности</label>
 <input id="s_prob_shift" type="number" step="0.01">
 <label>Stop Loss %</label>
 <input id="s_stop_loss" type="number" step="0.01">
 </div>
-<button class="btn" onclick="saveSettings()">💾 Save Settings</button>
-<div class="save-msg" id="save-msg">✅ Saved! Restart bot to apply token/channel changes.</div>
+<button class="btn" onclick="saveSettings()">💾 Сохранить настройки</button>
+<div class="save-msg" id="save-msg">✅ Сохранено! Перезапусти бота для применения изменений токена/канала.</div>
 </div>
 
 </div>
@@ -412,11 +412,11 @@ function renderPortfolio(data) {{
     const t = data.today || {{}};
     const pnlClass = (p.realized_pnl||0) >= 0 ? 'green' : 'red';
     document.getElementById('portfolio-card').innerHTML = `
-        <div class="stat"><div class="stat-value">${{p.open_positions||0}}</div><div class="stat-label">Open Positions</div></div>
-        <div class="stat"><div class="stat-value">${{(p.total_invested||0).toFixed(2)}}</div><div class="stat-label">Invested ($)</div></div>
-        <div class="stat"><div class="stat-value ${{pnlClass}}">${{(p.realized_pnl||0)>=0?'+':''}}${{(p.realized_pnl||0).toFixed(2)}}</div><div class="stat-label">Realized P&L</div></div>
-        <div class="stat"><div class="stat-value">${{(p.win_rate||0).toFixed(0)}}%</div><div class="stat-label">Win Rate</div></div>
-        <div class="stat"><div class="stat-value">${{p.wins||0}}W / ${{p.losses||0}}L</div><div class="stat-label">Record</div></div>`;
+        <div class="stat"><div class="stat-value">${{p.open_positions||0}}</div><div class="stat-label">Открытых позиций</div></div>
+        <div class="stat"><div class="stat-value">${{(p.total_invested||0).toFixed(2)}}</div><div class="stat-label">Вложено ($)</div></div>
+        <div class="stat"><div class="stat-value ${{pnlClass}}">${{(p.realized_pnl||0)>=0?'+':''}}${{(p.realized_pnl||0).toFixed(2)}}</div><div class="stat-label">Реализованный P&L</div></div>
+        <div class="stat"><div class="stat-value">${{(p.win_rate||0).toFixed(0)}}%</div><div class="stat-label">Процент побед</div></div>
+        <div class="stat"><div class="stat-value">${{p.wins||0}}W / ${{p.losses||0}}L</div><div class="stat-label">Результат</div></div>`;
 }}
 function renderMarkets(m) {{
     document.querySelector('#markets-table tbody').innerHTML = m.slice(0,30).map((x,i) => `<tr><td>${{i+1}}</td><td>${{x.question?.substring(0,55)||''}}</td><td>${{x.category||''}}</td><td>${{x.latest_price?(x.latest_price*100).toFixed(0)+'%':'N/A'}}</td><td>${{x.price_updated?.substring(11,16)||''}}</td></tr>`).join('');
@@ -427,12 +427,12 @@ function renderSignals(s) {{
 function renderTrades(t) {{
     document.querySelector('#trades-table tbody').innerHTML = t.map(x => {{
         const cls = (x.pnl||0)>=0?'green':'red';
-        const btn = ['pending','filled'].includes(x.status)?`<button class="btn btn-danger" onclick="closeTrade(${{x.id}})">Close</button>`:'';
+        const btn = ['pending','filled'].includes(x.status)?`<button class="btn btn-danger" onclick="closeTrade(${{x.id}})">Закрыть</button>`:'';
         return `<tr><td>${{x.created_at?.substring(11,16)||''}}</td><td>${{x.question?.substring(0,40)||''}}</td><td>${{x.side}}</td><td>$${{(x.size_usdc||0).toFixed(2)}}</td><td>${{(x.price||0).toFixed(4)}}</td><td class="${{cls}}">$${{(x.pnl||0).toFixed(2)}}</td><td>${{x.status}}</td><td>${{btn}}</td></tr>`;
     }}).join('');
 }}
 async function closeTrade(id) {{
-    if (!confirm('Close?')) return;
+    if (!confirm('Закрыть позицию?')) return;
     await fetch(API('/api/trade/close/'+id), {{method:'POST'}});
     refresh();
 }}
