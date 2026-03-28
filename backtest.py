@@ -1,4 +1,4 @@
-"""Бэктест — проверка стратегии v2 на исторических данных"""
+"""Бэктест — сравнение разных стратегий"""
 
 import asyncio
 import aiosqlite
@@ -10,28 +10,22 @@ TRASH_PATTERNS = [
     "will trump say", "will biden say", "will elon say",
     "will mrbeast say", "said during",
     'say "', "say '",
-    "during the next episode",
-    "during his next video",
+    "during the next episode", "during his next video",
     "during the fii", "during the press conference",
     "at the rally",
-    "highest temperature", "lowest temperature",
-    "weather",
+    "highest temperature", "lowest temperature", "weather",
 ]
 
 
-def is_trash(question: str) -> bool:
-    q = question.lower()
-    for p in TRASH_PATTERNS:
-        if p in q:
-            return True
-    return False
+def is_trash(q: str) -> bool:
+    q = q.lower()
+    return any(p in q for p in TRASH_PATTERNS)
 
 
 async def main():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
 
-        # Все сигналы с ценами
         cursor = await db.execute('''
             SELECT s.*, m.question, m.token_id_yes
             FROM signals s JOIN markets m ON s.market_id = m.id
@@ -41,113 +35,121 @@ async def main():
 
         bet = 50
 
-        # === Стратегия v1 (старая — всё подряд) ===
-        v1_profit = 0
-        v1_count = 0
-        v1_wins = 0
+        async def get_current_price(market_id):
+            c = await db.execute(
+                'SELECT price_yes FROM price_history WHERE market_id=? ORDER BY recorded_at DESC LIMIT 1',
+                (market_id,))
+            r = await c.fetchone()
+            return r[0] if r else None
 
+        # === V1: Всё подряд ===
+        v1_pnl, v1_n, v1_w = 0, 0, 0
         for s in all_signals:
             entry = s['probability_at_signal'] or 0
-            if entry <= 0 or entry >= 1:
-                continue
-            cursor2 = await db.execute(
-                'SELECT price_yes FROM price_history WHERE market_id=? ORDER BY recorded_at DESC LIMIT 1',
-                (s['market_id'],)
-            )
-            row = await cursor2.fetchone()
-            if not row:
-                continue
-            current = row[0] or 0
-
+            if entry <= 0 or entry >= 1: continue
+            cur = await get_current_price(s['market_id'])
+            if cur is None: continue
             if s['direction'] == 'BUY':
-                shares = bet / entry
-                pnl = (current - entry) * shares
+                pnl = (cur - entry) * (bet / entry)
             else:
-                shares = bet / (1 - entry)
-                pnl = (entry - current) * shares
+                pnl = (entry - cur) * (bet / (1 - entry))
+            v1_pnl += pnl; v1_n += 1
+            if pnl > 0: v1_w += 1
 
-            v1_profit += pnl
-            v1_count += 1
-            if pnl > 0:
-                v1_wins += 1
-
-        # === Стратегия v2 (новая — только BUY, 15-70%, без мусора) ===
-        v2_profit = 0
-        v2_count = 0
-        v2_wins = 0
-        v2_details = []
-
+        # === V2: BUY моментум 15-70% ===
+        v2_pnl, v2_n, v2_w = 0, 0, 0
         for s in all_signals:
             entry = s['probability_at_signal'] or 0
             change = s['probability_change'] or 0
+            if change <= 0 or entry < 0.15 or entry > 0.70: continue
+            if (1 - entry) / entry < 0.30: continue
+            if is_trash(s['question']): continue
+            if (s['confidence'] or 0) < 0.5: continue
+            cur = await get_current_price(s['market_id'])
+            if cur is None: continue
+            pnl = (cur - entry) * (bet / entry)
+            v2_pnl += pnl; v2_n += 1
+            if pnl > 0: v2_w += 1
 
-            # Фильтры v2
-            if change <= 0:  # только рост
-                continue
-            if entry < 0.15 or entry > 0.70:  # только 15-70%
-                continue
-            potential = (1.0 - entry) / entry
-            if potential < 0.30:  # мин 30% потенциал
-                continue
-            if is_trash(s['question']):  # мусор
-                continue
-            if (s['confidence'] or 0) < 0.5:  # мин уверенность
-                continue
+        # === V3: КОНТРАРИАНСКАЯ — покупай после падения ===
+        # Логика: цена упала >8%, но всё ещё 20-65% — покупаем отскок
+        v3_pnl, v3_n, v3_w = 0, 0, 0
+        v3_details = []
+        for s in all_signals:
+            entry = s['probability_at_signal'] or 0
+            change = s['probability_change'] or 0
+            if change >= 0: continue  # только падающие
+            if abs(change) < 0.08: continue  # минимум -8%
+            if entry < 0.20 or entry > 0.65: continue
+            if is_trash(s['question']): continue
+            cur = await get_current_price(s['market_id'])
+            if cur is None: continue
+            pnl = (cur - entry) * (bet / entry)
+            v3_pnl += pnl; v3_n += 1
+            if pnl > 0: v3_w += 1
+            v3_details.append((pnl, entry, cur, s['question'][:55]))
 
-            cursor2 = await db.execute(
-                'SELECT price_yes FROM price_history WHERE market_id=? ORDER BY recorded_at DESC LIMIT 1',
-                (s['market_id'],)
-            )
-            row = await cursor2.fetchone()
-            if not row:
-                continue
-            current = row[0] or 0
+        # === V4: КОМБО — BUY при высоком объёме + средняя цена ===
+        # Логика: любое направление, но объём 3x+, цена 25-60%
+        v4_pnl, v4_n, v4_w = 0, 0, 0
+        v4_details = []
+        for s in all_signals:
+            entry = s['probability_at_signal'] or 0
+            change = s['probability_change'] or 0
+            if entry < 0.25 or entry > 0.60: continue
+            if is_trash(s['question']): continue
+            if (s['confidence'] or 0) < 0.7: continue
+            cur = await get_current_price(s['market_id'])
+            if cur is None: continue
+            # Всегда BUY (покупаем YES по средней цене)
+            pnl = (cur - entry) * (bet / entry)
+            v4_pnl += pnl; v4_n += 1
+            if pnl > 0: v4_w += 1
+            v4_details.append((pnl, entry, cur, s['question'][:55]))
 
-            shares = bet / entry
-            pnl = (current - entry) * shares
+        # === V5: SELL дорогое — продавай когда >75% и падает ===
+        v5_pnl, v5_n, v5_w = 0, 0, 0
+        v5_details = []
+        for s in all_signals:
+            entry = s['probability_at_signal'] or 0
+            change = s['probability_change'] or 0
+            if change >= 0: continue  # только падающие
+            if entry < 0.75: continue  # дорогие рынки
+            if is_trash(s['question']): continue
+            cur = await get_current_price(s['market_id'])
+            if cur is None: continue
+            # SELL = покупаем NO, профит если цена падает
+            pnl = (entry - cur) * (bet / (1 - entry))
+            v5_pnl += pnl; v5_n += 1
+            if pnl > 0: v5_w += 1
+            v5_details.append((pnl, entry, cur, s['question'][:55]))
 
-            v2_profit += pnl
-            v2_count += 1
-            if pnl > 0:
-                v2_wins += 1
-            v2_details.append((pnl, entry, current, s['confidence'], s['question'][:55]))
+        # === Вывод ===
+        def show(name, pnl, n, w, details=None):
+            if n == 0:
+                print(f"\n--- {name} ---\nСигналов: 0\n")
+                return
+            wr = w / n * 100
+            roi = pnl / (bet * n) * 100
+            print(f"\n--- {name} ---")
+            print(f"Сигналов: {n}")
+            print(f"Вложено: ${bet * n:,.0f}")
+            print(f"P&L: ${pnl:+,.2f}")
+            print(f"Win rate: {wr:.1f}%")
+            print(f"ROI: {roi:+.1f}%")
+            if details:
+                details.sort(key=lambda x: x[0], reverse=True)
+                print(f"  Лучшая: ${details[0][0]:+.2f} | {details[0][1]*100:.0f}%->{details[0][2]*100:.0f}% | {details[0][3]}")
+                print(f"  Худшая: ${details[-1][0]:+.2f} | {details[-1][1]*100:.0f}%->{details[-1][2]*100:.0f}% | {details[-1][3]}")
 
-        # === Результаты ===
         print("=" * 60)
-        print("БЭКТЕСТ: Стратегия v1 (старая) vs v2 (новая)")
+        print("БЭКТЕСТ: 5 стратегий")
         print("=" * 60)
-
-        print(f"\n--- v1: ВСЁ ПОДРЯД ---")
-        print(f"Сигналов: {v1_count}")
-        print(f"Вложено: ${bet * v1_count:,.0f}")
-        print(f"P&L: ${v1_profit:+,.2f}")
-        v1_wr = v1_wins / v1_count * 100 if v1_count else 0
-        print(f"Win rate: {v1_wr:.1f}%")
-        v1_roi = v1_profit / (bet * v1_count) * 100 if v1_count else 0
-        print(f"ROI: {v1_roi:+.1f}%")
-
-        print(f"\n--- v2: ТОЛЬКО BUY 15-70%, БЕЗ МУСОРА ---")
-        print(f"Сигналов: {v2_count}")
-        print(f"Вложено: ${bet * v2_count:,.0f}")
-        print(f"P&L: ${v2_profit:+,.2f}")
-        v2_wr = v2_wins / v2_count * 100 if v2_count else 0
-        print(f"Win rate: {v2_wr:.1f}%")
-        v2_roi = v2_profit / (bet * v2_count) * 100 if v2_count else 0
-        print(f"ROI: {v2_roi:+.1f}%")
-
-        print(f"\n--- РАЗНИЦА ---")
-        print(f"Сигналов: {v1_count} → {v2_count} ({v2_count - v1_count:+d})")
-        print(f"Win rate: {v1_wr:.1f}% → {v2_wr:.1f}%")
-        print(f"ROI: {v1_roi:+.1f}% → {v2_roi:+.1f}%")
-
-        if v2_details:
-            v2_details.sort(key=lambda x: x[0], reverse=True)
-            print(f"\n=== ТОП-5 ЛУЧШИХ v2 ===")
-            for pnl, entry, cur, conf, q in v2_details[:5]:
-                print(f"  ${pnl:+.2f} | {entry*100:.0f}%->{cur*100:.0f}% | conf {conf:.2f} | {q}")
-            print(f"\n=== ТОП-5 ХУДШИХ v2 ===")
-            for pnl, entry, cur, conf, q in v2_details[-5:]:
-                print(f"  ${pnl:+.2f} | {entry*100:.0f}%->{cur*100:.0f}% | conf {conf:.2f} | {q}")
+        show("V1: Всё подряд (старая)", v1_pnl, v1_n, v1_w)
+        show("V2: BUY моментум 15-70%", v2_pnl, v2_n, v2_w)
+        show("V3: КОНТРАРИАНСКАЯ (покупай после падения 20-65%)", v3_pnl, v3_n, v3_w, v3_details)
+        show("V4: BUY при высокой уверенности 25-60%", v4_pnl, v4_n, v4_w, v4_details)
+        show("V5: SELL дорогое (>75% и падает)", v5_pnl, v5_n, v5_w, v5_details)
 
 
 asyncio.run(main())
