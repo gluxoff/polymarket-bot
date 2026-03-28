@@ -15,7 +15,7 @@ _client = None  # PolymarketClient
 _chart_gen = None
 
 # Состояния ConversationHandler для /connect
-WAITING_API_KEY, WAITING_API_SECRET, WAITING_API_PASSPHRASE = range(3)
+WAITING_CONNECT_METHOD, WAITING_PRIVATE_KEY, WAITING_API_KEY, WAITING_API_SECRET, WAITING_API_PASSPHRASE = range(5)
 
 
 def set_components(publisher, scheduler, scanner, client=None, chart_gen=None):
@@ -35,6 +35,21 @@ def _is_private(update: Update) -> bool:
     return update.effective_chat and update.effective_chat.type == "private"
 
 
+async def _get_clob_for_user(telegram_id: int):
+    """Получить CLOB клиент для юзера (по private_key или API keys)"""
+    user = await db.get_user_by_telegram_id(telegram_id)
+    if not user or not _client:
+        return None
+    if user.get("private_key"):
+        return await _client.get_user_client(telegram_id, private_key=user["private_key"])
+    elif user.get("api_key"):
+        return await _client.get_user_client(
+            telegram_id, api_key=user["api_key"],
+            api_secret=user["api_secret"], api_passphrase=user["api_passphrase"],
+        )
+    return None
+
+
 # ── Юзерские команды (личка) ─────────────────────────────────
 
 STRATEGIES = {
@@ -47,7 +62,7 @@ STRATEGIES = {
 async def _build_main_menu(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """Собрать главное меню с текущим статусом"""
     db_user = await db.get_user_by_telegram_id(user_id)
-    is_connected = bool(db_user and db_user.get("api_key"))
+    is_connected = bool(db_user and (db_user.get("api_key") or db_user.get("private_key")))
 
     if not is_connected:
         text = (
@@ -604,7 +619,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /connect — пошаговый ввод API ключей ─────────────────────
 
 async def connect_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало подключения — запрос API Key"""
+    """Начало подключения — выбор метода"""
     if not _is_private(update):
         return ConversationHandler.END
 
@@ -613,27 +628,55 @@ async def connect_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🔑 <b>Подключение Polymarket</b>\n\n"
-        "Тебе нужны L2 API ключи от Polymarket.\n"
-        "Их можно получить на polymarket.com → Settings → API Keys.\n\n"
-        "Шаг 1/3: Отправь <b>API Key</b>:"
+        "Выбери способ подключения:\n\n"
+        "1️⃣ Отправь <b>приватный ключ</b> кошелька (начинается с 0x)\n"
+        "   <i>Проще всего — бот сам настроит API</i>\n\n"
+        "2️⃣ Отправь <b>API Key</b> (если уже есть API ключи)\n\n"
+        "Или /cancel для отмены"
     )
     await update.message.reply_text(text, parse_mode="HTML")
-    return WAITING_API_KEY
+    return WAITING_CONNECT_METHOD
 
 
-async def connect_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получен API Key, запрос Secret"""
-    context.user_data["pm_api_key"] = update.message.text.strip()
-    # Удаляем сообщение с ключом для безопасности
+async def connect_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Определяем метод по содержимому — приватный ключ или API key"""
+    text = update.message.text.strip()
+
     try:
         await update.message.delete()
     except Exception:
         pass
-    await update.message.reply_text(
-        "✅ API Key получен.\n\nШаг 2/3: Отправь <b>API Secret</b>:",
-        parse_mode="HTML",
-    )
-    return WAITING_API_SECRET
+
+    # Если начинается с 0x и длинный — это приватный ключ
+    if text.startswith("0x") and len(text) >= 60:
+        telegram_id = update.effective_user.id
+
+        await update.message.reply_text("⏳ Проверяю ключ...")
+
+        if _client:
+            user_clob = await _client.get_user_client(telegram_id, private_key=text)
+            if not user_clob:
+                await update.message.reply_text(
+                    "❌ Неверный ключ. Проверь и попробуй снова: /connect"
+                )
+                return ConversationHandler.END
+
+        await db.save_user_private_key(telegram_id, text)
+
+        await update.message.reply_text(
+            "✅ <b>Polymarket подключён!</b>\n\nНажми /start для настройки.",
+            parse_mode="HTML",
+        )
+        logger.info(f"Юзер {telegram_id} подключил Polymarket (private key)")
+        return ConversationHandler.END
+    else:
+        # Это API Key — переходим к вводу Secret
+        context.user_data["pm_api_key"] = text
+        await update.message.reply_text(
+            "✅ API Key получен.\n\nОтправь <b>API Secret</b>:",
+            parse_mode="HTML",
+        )
+        return WAITING_API_SECRET
 
 
 async def connect_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -644,7 +687,7 @@ async def connect_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception:
         pass
     await update.message.reply_text(
-        "✅ API Secret получен.\n\nШаг 3/3: Отправь <b>API Passphrase</b>:",
+        "✅ API Secret получен.\n\nОтправь <b>API Passphrase</b>:",
         parse_mode="HTML",
     )
     return WAITING_API_PASSPHRASE
@@ -662,34 +705,30 @@ async def connect_passphrase(update: Update, context: ContextTypes.DEFAULT_TYPE)
     api_secret = context.user_data.pop("pm_api_secret", "")
     telegram_id = update.effective_user.id
 
-    # Проверяем ключи — пробуем создать клиент
     if _client:
-        user_clob = await _client.get_user_client(telegram_id, api_key, api_secret, passphrase)
+        user_clob = await _client.get_user_client(
+            telegram_id, api_key=api_key, api_secret=api_secret, api_passphrase=passphrase
+        )
         if not user_clob:
             await update.message.reply_text(
-                "❌ Не удалось подключиться. Проверь ключи и попробуй снова: /connect"
+                "❌ Не удалось подключиться. Проверь ключи: /connect"
             )
             return ConversationHandler.END
 
-    # Сохраняем в БД
     await db.save_user_api_keys(telegram_id, api_key, api_secret, passphrase)
 
     await update.message.reply_text(
-        "✅ <b>Polymarket подключён!</b>\n\n"
-        "Теперь ты можешь торговать:\n"
-        "/trade &lt;market_id&gt; &lt;YES/NO&gt; &lt;$сумма&gt;\n"
-        "/portfolio — твой портфель",
+        "✅ <b>Polymarket подключён!</b>\n\nНажми /start для настройки.",
         parse_mode="HTML",
     )
-    logger.info(f"Юзер {telegram_id} подключил Polymarket")
+    logger.info(f"Юзер {telegram_id} подключил Polymarket (API keys)")
     return ConversationHandler.END
 
 
 async def connect_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена подключения"""
     context.user_data.pop("pm_api_key", None)
     context.user_data.pop("pm_api_secret", None)
-    await update.message.reply_text("❌ Подключение отменено.")
+    await update.message.reply_text("❌ Отменено.")
     return ConversationHandler.END
 
 
@@ -1000,11 +1039,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── ConversationHandler для /connect ─────────────────────────
 
 def get_connect_handler() -> ConversationHandler:
-    """Возвращает ConversationHandler для пошагового подключения API"""
+    """ConversationHandler для подключения (приватный ключ или API ключи)"""
     return ConversationHandler(
         entry_points=[CommandHandler("connect", connect_start)],
         states={
-            WAITING_API_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, connect_api_key)],
+            WAITING_CONNECT_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, connect_method)],
             WAITING_API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, connect_api_secret)],
             WAITING_API_PASSPHRASE: [MessageHandler(filters.TEXT & ~filters.COMMAND, connect_passphrase)],
         },

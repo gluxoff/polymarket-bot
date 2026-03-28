@@ -75,6 +75,7 @@ async def init_db():
                 api_key TEXT,
                 api_secret TEXT,
                 api_passphrase TEXT,
+                private_key TEXT,
                 auto_trade INTEGER DEFAULT 0,
                 auto_amount REAL DEFAULT 0.5,
                 auto_max_daily REAL DEFAULT 5.0,
@@ -137,11 +138,21 @@ async def save_user_api_keys(telegram_id: int, api_key: str, api_secret: str, ap
         await conn.commit()
 
 
+async def save_user_private_key(telegram_id: int, private_key: str):
+    """Сохранить приватный ключ пользователя"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE users SET private_key=?, is_active=1 WHERE telegram_id=?",
+            (private_key, telegram_id),
+        )
+        await conn.commit()
+
+
 async def delete_user_api_keys(telegram_id: int):
     """Удалить API ключи пользователя"""
     async with aiosqlite.connect(config.DB_PATH) as conn:
         await conn.execute(
-            "UPDATE users SET api_key=NULL, api_secret=NULL, api_passphrase=NULL WHERE telegram_id=?",
+            "UPDATE users SET api_key=NULL, api_secret=NULL, api_passphrase=NULL, private_key=NULL WHERE telegram_id=?",
             (telegram_id,),
         )
         await conn.commit()
@@ -152,7 +163,7 @@ async def get_connected_users() -> list[dict]:
     async with aiosqlite.connect(config.DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute(
-            "SELECT * FROM users WHERE api_key IS NOT NULL AND is_active = 1"
+            "SELECT * FROM users WHERE (api_key IS NOT NULL OR private_key IS NOT NULL) AND is_active = 1"
         )
         return [dict(row) for row in await cursor.fetchall()]
 
@@ -194,7 +205,7 @@ async def get_auto_trade_users() -> list[dict]:
     async with aiosqlite.connect(config.DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute(
-            "SELECT * FROM users WHERE api_key IS NOT NULL AND auto_trade = 1 AND is_active = 1"
+            "SELECT * FROM users WHERE (api_key IS NOT NULL OR private_key IS NOT NULL) AND auto_trade = 1 AND is_active = 1"
         )
         return [dict(row) for row in await cursor.fetchall()]
 

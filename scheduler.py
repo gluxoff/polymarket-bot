@@ -190,10 +190,14 @@ class PolymarketScheduler:
                         break
 
                     # Получаем CLOB клиент юзера
-                    user_clob = await client.get_user_client(
-                        user["telegram_id"],
-                        user["api_key"], user["api_secret"], user["api_passphrase"],
-                    )
+                    if user.get("private_key"):
+                        user_clob = await client.get_user_client(user["telegram_id"], private_key=user["private_key"])
+                    else:
+                        user_clob = await client.get_user_client(
+                            user["telegram_id"],
+                            api_key=user["api_key"], api_secret=user["api_secret"],
+                            api_passphrase=user["api_passphrase"],
+                        )
                     if not user_clob:
                         logger.error(f"Автоставки: CLOB недоступен для {user['telegram_id']}")
                         break

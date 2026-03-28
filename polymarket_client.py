@@ -36,16 +36,17 @@ class RateLimiter:
 
 
 class UserClobClient:
-    """CLOB клиент для конкретного юзера (по API ключам)"""
+    """CLOB клиент для конкретного юзера (по приватному ключу или API ключам)"""
 
-    def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
+    def __init__(self, api_key: str = "", api_secret: str = "", api_passphrase: str = "",
+                 private_key: str = ""):
         self.api_key = api_key
         self.api_secret = api_secret
         self.api_passphrase = api_passphrase
+        self.private_key = private_key
         self._client = None
 
     async def init(self) -> bool:
-        """Инициализация CLOB клиента из L2 API ключей"""
         try:
             loop = asyncio.get_event_loop()
             self._client = await loop.run_in_executor(None, self._init_sync)
@@ -56,19 +57,30 @@ class UserClobClient:
 
     def _init_sync(self):
         from py_clob_client.client import ClobClient
-        from py_clob_client.clob_types import ApiCreds
 
-        client = ClobClient(
-            config.CLOB_API_URL,
-            chain_id=config.POLYMARKET_CHAIN_ID,
-        )
-        creds = ApiCreds(
-            api_key=self.api_key,
-            api_secret=self.api_secret,
-            api_passphrase=self.api_passphrase,
-        )
-        client.set_api_creds(creds)
-        return client
+        if self.private_key:
+            # Подключение по приватному ключу — автогенерация API credentials
+            client = ClobClient(
+                config.CLOB_API_URL,
+                key=self.private_key,
+                chain_id=config.POLYMARKET_CHAIN_ID,
+            )
+            client.set_api_creds(client.create_or_derive_api_creds())
+            return client
+        else:
+            # Подключение по готовым API ключам
+            from py_clob_client.clob_types import ApiCreds
+            client = ClobClient(
+                config.CLOB_API_URL,
+                chain_id=config.POLYMARKET_CHAIN_ID,
+            )
+            creds = ApiCreds(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                api_passphrase=self.api_passphrase,
+            )
+            client.set_api_creds(creds)
+            return client
 
     @property
     def is_ready(self) -> bool:
@@ -131,14 +143,18 @@ class PolymarketClient:
 
     # ── Per-user CLOB клиенты ────────────────────────────────
 
-    async def get_user_client(self, telegram_id: int, api_key: str, api_secret: str, api_passphrase: str) -> UserClobClient | None:
+    async def get_user_client(self, telegram_id: int, api_key: str = "", api_secret: str = "",
+                              api_passphrase: str = "", private_key: str = "") -> UserClobClient | None:
         """Получить или создать CLOB клиент для юзера"""
         if telegram_id in self._user_clients:
             client = self._user_clients[telegram_id]
             if client.is_ready:
                 return client
 
-        client = UserClobClient(api_key, api_secret, api_passphrase)
+        client = UserClobClient(
+            api_key=api_key, api_secret=api_secret,
+            api_passphrase=api_passphrase, private_key=private_key,
+        )
         ok = await client.init()
         if ok:
             self._user_clients[telegram_id] = client
