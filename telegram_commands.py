@@ -288,7 +288,7 @@ async def _show_trade_confirm(query, market_id: int, side: str):
         return
 
     user = await db.get_user_by_telegram_id(query.from_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await query.edit_message_text(
             "❌ Сначала подключи Polymarket через /connect",
             reply_markup=_back_button(),
@@ -332,10 +332,7 @@ async def _execute_trade(query, market_id: int, side: str, amount: float):
         await query.edit_message_text("❌ Нет токена.", reply_markup=_back_button())
         return
 
-    user_clob = await _client.get_user_client(
-        query.from_user.id,
-        user_data["api_key"], user_data["api_secret"], user_data["api_passphrase"],
-    )
+    user_clob = await _get_clob_for_user(query.from_user.id)
     if not user_clob:
         await query.edit_message_text("❌ Ошибка подключения. Переподключись: /connect", reply_markup=_back_button())
         return
@@ -387,7 +384,7 @@ async def _execute_trade(query, market_id: int, side: str, amount: float):
 async def _show_portfolio(query):
     """Показать портфель через кнопку"""
     user = await db.get_user_by_telegram_id(query.from_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await query.edit_message_text(
             "💼 Polymarket не подключён.\nНажми /connect чтобы подключить.",
             reply_markup=_back_button(),
@@ -448,7 +445,7 @@ async def _show_positions(query):
 async def _close_position(query, trade_id: int):
     """Закрыть позицию через кнопку"""
     user = await db.get_user_by_telegram_id(query.from_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await query.edit_message_text("❌ Polymarket не подключён.", reply_markup=_back_button())
         return
 
@@ -458,9 +455,7 @@ async def _close_position(query, trade_id: int):
         await query.edit_message_text(f"❌ Позиция #{trade_id} не найдена.", reply_markup=_back_button())
         return
 
-    user_clob = await _client.get_user_client(
-        query.from_user.id, user["api_key"], user["api_secret"], user["api_passphrase"],
-    )
+    user_clob = await _get_clob_for_user(query.from_user.id)
     if not user_clob:
         await query.edit_message_text("❌ Ошибка подключения.", reply_markup=_back_button())
         return
@@ -516,7 +511,7 @@ async def _show_signals(query):
 async def _show_settings(query):
     """Настройки: стратегия, сумма, лимит"""
     user = await db.get_user_by_telegram_id(query.from_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await query.edit_message_text("❌ Сначала подключи Polymarket.", reply_markup=_back_button())
         return
 
@@ -757,7 +752,7 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сначала нажми /start")
         return
 
-    if not user.get("api_key"):
+    if not (user.get("api_key") or user.get("private_key")):
         await update.message.reply_text(
             "💼 Polymarket не подключён.\n"
             "Подключи через /connect чтобы видеть портфель."
@@ -793,7 +788,7 @@ async def cmd_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await db.get_user_by_telegram_id(update.effective_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await update.message.reply_text("❌ Сначала подключи Polymarket: /connect")
         return
 
@@ -828,10 +823,7 @@ async def cmd_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Получаем CLOB клиент юзера
-    user_clob = await _client.get_user_client(
-        update.effective_user.id,
-        user["api_key"], user["api_secret"], user["api_passphrase"],
-    )
+    user_clob = await _get_clob_for_user(update.effective_user.id)
     if not user_clob:
         await update.message.reply_text("❌ Ошибка подключения к Polymarket. Переподключись: /connect")
         return
@@ -885,7 +877,7 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await db.get_user_by_telegram_id(update.effective_user.id)
-    if not user or not user.get("api_key"):
+    if not user or not (user.get("api_key") or user.get("private_key")):
         await update.message.reply_text("❌ Сначала подключи Polymarket: /connect")
         return
 
@@ -907,10 +899,7 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Позиция #{trade_id} не найдена")
         return
 
-    user_clob = await _client.get_user_client(
-        update.effective_user.id,
-        user["api_key"], user["api_secret"], user["api_passphrase"],
-    )
+    user_clob = await _get_clob_for_user(update.effective_user.id)
     if not user_clob:
         await update.message.reply_text("❌ Ошибка подключения")
         return
