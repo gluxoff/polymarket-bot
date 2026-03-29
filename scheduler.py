@@ -151,10 +151,10 @@ class PolymarketScheduler:
                 market = item["market"]
                 change = analysis["change_1h"]
 
-                # Только сильные просадки: >15% падение, цена 20-65%
+                # Только сильные просадки: >20% падение, цена 20-65%
                 if change >= 0:
                     continue
-                if abs(change) < 0.15:
+                if abs(change) < 0.20:
                     continue
                 price = analysis["current_price"]
                 if price < 0.20 or price > 0.65:

@@ -10,14 +10,19 @@ from analytics_engine import AnalyticsEngine
 TRASH_PATTERNS = [
     "will trump say", "will biden say", "will elon say",
     "will mrbeast say", "said during",
-    'say "', "say '",
+    'say "', "say '", "be said",
     "during the next episode", "during his next video",
     "during the fii", "during the press conference",
-    "at the rally",
+    "at the rally", "at the rotterdam", "grand final",
     "highest temperature", "lowest temperature", "weather",
+    "cricket", "legends cricket", "ipl",
+    "set 1 winner", "set 1 games", "o/u",
+    "hit 41", "hit 42", "hit 40", "hit 35", "hit 7",
+    "(low)", "(high)",
+    "full lid", "white house call",
 ]
 
-MAX_SIGNALS_PER_CYCLE = 5
+MAX_SIGNALS_PER_CYCLE = 3
 
 
 class SignalGenerator:
@@ -53,8 +58,8 @@ class SignalGenerator:
             if change_1h >= 0:
                 continue
 
-            # Падение минимум 8%
-            if abs(change_1h) < 0.08:
+            # Падение минимум 12%
+            if abs(change_1h) < 0.12:
                 continue
 
             # Цена 20-65% — не слишком дешёвая (мусор) и не дорогая
@@ -71,7 +76,7 @@ class SignalGenerator:
             # === SCORING ===
             confidence = self._calculate_confidence(analysis, reasons, potential_profit)
 
-            if confidence < 0.45:
+            if confidence < 0.55:
                 continue
 
             reasoning = self._build_reasoning(analysis, potential_profit)
