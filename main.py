@@ -91,21 +91,22 @@ async def post_init(application: Application):
         await start_web_admin(application)
         logger.info(f"Web Admin: http://0.0.0.0:{config.WEB_ADMIN_PORT}")
 
-    # Первое сканирование
-    logger.info("Первое сканирование рынков...")
-    await scanner.scan_markets()
-    await scanner.update_prices()
+    # Первое сканирование — в фоне, не блокируя бот
+    async def _initial_scan():
+        logger.info("Первое сканирование рынков (фон)...")
+        await scanner.scan_markets()
+        await scanner.update_prices()
+        markets = await db.get_active_markets()
+        logger.info(f"Сканирование завершено: {len(markets)} рынков")
 
-    markets = await db.get_active_markets()
+    asyncio.create_task(_initial_scan())
+
     users = await db.get_connected_users()
     logger.info("Бот запущен и готов к работе")
     logger.info(f"  Канал: {config.TELEGRAM_CHANNEL_ID or 'не задан'}")
-    logger.info(f"  Рынков: {len(markets)}")
     logger.info(f"  Подключённых юзеров: {len(users)}")
     logger.info(f"  Категории: {', '.join(config.CATEGORIES)}")
-    logger.info(f"  Часовой пояс: {config.TIMEZONE}")
     logger.info(f"  Скан: каждые {config.SCAN_INTERVAL_MINUTES} мин")
-    logger.info(f"  Анализ: каждые {config.DEEP_ANALYSIS_INTERVAL_MINUTES} мин")
 
 
 async def run_setup_mode():
