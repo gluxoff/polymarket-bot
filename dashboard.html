@@ -48,10 +48,24 @@ body{font-family:'SF Mono',Monaco,'Courier New',monospace;background:#060608;col
 .chart-t{font-size:9px;color:#333;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
 canvas.ch{width:100%!important;background:transparent}
 
-/* Heatmap */
-.hm-wrap{padding:8px;border-bottom:1px solid #151518}
-.hm{display:grid;grid-template-columns:repeat(8,1fr);gap:3px}
-.hc{aspect-ratio:1;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(255,255,255,.5);transition:transform .15s}
+/* Matrix columns */
+.matrix-wrap{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #151518;height:280px;overflow:hidden}
+.matrix-col{position:relative;overflow:hidden;border-right:1px solid #151518}
+.matrix-col:last-child{border-right:none}
+.matrix-col .matrix-label{position:absolute;top:4px;left:8px;font-size:8px;color:#252528;letter-spacing:2px;z-index:2}
+.matrix-scroll{animation:matrixDown 30s linear infinite}
+.matrix-scroll2{animation:matrixDown 25s linear infinite}
+@keyframes matrixDown{0%{transform:translateY(0)}100%{transform:translateY(-50%)}}
+.mx-row{padding:4px 8px;font-size:10px;line-height:1.6;border-bottom:1px solid #0a0a0c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mx-row .mx-t{color:#1e1e22;font-size:8px;margin-right:4px}
+.mx-row .mx-act{color:#00ff8866;font-size:9px}
+.mx-row .mx-q{color:#333}
+.mx-row .mx-p{font-weight:600;margin-left:4px}
+.mx-row .mx-p.up{color:#00ff8888}
+.mx-row .mx-p.dn{color:#ff334488}
+.mx-row.active{background:rgba(0,255,136,.03)}
+.mx-row.active .mx-q{color:#555}
+.mx-row.active .mx-act{color:#00ff88}
 
 /* Section */
 .sec-t{font-size:9px;color:#252528;text-transform:uppercase;letter-spacing:2px;padding:10px 12px;border-bottom:1px solid #151518;background:#08080a}
@@ -106,7 +120,10 @@ canvas.ch{width:100%!important;background:transparent}
 <div class="col-l">
     <div class="scan"><canvas id="scanC"></canvas><div class="scan-l">AI SCANNER</div><div class="scan-r" id="scan-n"></div></div>
     <div class="chart-wrap"><div class="chart-t">Cumulative P&L</div><div style="height:120px"><canvas id="pnlChart" class="ch"></canvas></div></div>
-    <div class="hm-wrap"><div class="chart-t">Market Heatmap</div><div class="hm" id="heatmap"></div></div>
+    <div class="matrix-wrap">
+        <div class="matrix-col"><div class="matrix-label">SCANNING</div><div class="matrix-scroll" id="matrix1"></div></div>
+        <div class="matrix-col"><div class="matrix-label">ANALYZING</div><div class="matrix-scroll2" id="matrix2"></div></div>
+    </div>
     <div class="sec-t">Trades</div>
     <div class="tr-wrap"><table class="tr" id="trades"><thead><tr><th>Time</th><th>Market</th><th>P&L</th></tr></thead><tbody></tbody></table></div>
 </div>
@@ -175,13 +192,26 @@ if(pnl.length){
     chart.update();
 }
 
-// Heatmap
+// Matrix columns
 if(movers.length){
-    document.getElementById('heatmap').innerHTML=movers.map(m=>{
-        const v=Math.min(Math.abs(m.change)/12,1);
-        const bg=m.change>=0?`rgba(0,255,136,${.08+v*.35})`:`rgba(255,51,68,${.08+v*.35})`;
-        return `<div class="hc" style="background:${bg}" title="${m.question}">${m.change>=0?'+':''}${m.change.toFixed(0)}</div>`;
-    }).join('');
+    const actions=['SCAN','CHECK','EVAL','WATCH','TRACK','CALC','PROBE','READ'];
+    const half=Math.ceil(movers.length/2);
+    const m1=movers.slice(0,half);
+    const m2=movers.slice(half);
+
+    function buildMatrix(items){
+        // Duplicate for seamless loop
+        const rows=items.map((m,i)=>{
+            const cls=m.change>=0?'up':'dn';
+            const sign=m.change>=0?'+':'';
+            const act=actions[i%actions.length];
+            const isActive=Math.abs(m.change)>10;
+            return `<div class="mx-row ${isActive?'active':''}"><span class="mx-t">${act}</span><span class="mx-act">▸</span> <span class="mx-q">${m.question}</span><span class="mx-p ${cls}">${m.price}% ${sign}${m.change}%</span></div>`;
+        }).join('');
+        return rows+rows;
+    }
+    document.getElementById('matrix1').innerHTML=buildMatrix(m1);
+    document.getElementById('matrix2').innerHTML=buildMatrix(m2);
 }
 
 // Feed
