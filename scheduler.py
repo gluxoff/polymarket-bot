@@ -319,8 +319,16 @@ class PolymarketScheduler:
                         logger.warning(f"Автоставки: нет token_id для сигнала")
                         continue
 
+                    # Цена: сначала CLOB midpoint, потом CLOB price, потом из БД
                     price = await client.get_midpoint(token_id)
-                    logger.info(f"Автоставки: цена midpoint для {token_id[:16]}... = {price}")
+                    if not price or price <= 0 or price >= 1:
+                        price = await client.get_price(token_id)
+                    if not price or price <= 0 or price >= 1:
+                        # Берём из БД (Gamma API цена)
+                        latest = await db.get_latest_price(signal["market_id"])
+                        if latest:
+                            price = latest["price_yes"]
+                    logger.info(f"Автоставки: цена для {token_id[:16]}... = {price}")
                     if not price or price <= 0 or price >= 1:
                         logger.warning(f"Автоставки: невалидная цена {price}")
                         continue
