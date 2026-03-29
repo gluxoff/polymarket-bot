@@ -183,6 +183,7 @@ class PolymarketScheduler:
 
             logger.info(f"🔥 Найдено {len(hot_signals)} горячих сигналов!")
 
+            hot_signal_data = []
             for hs in hot_signals:
                 market = hs["market"]
                 analysis = hs["analysis"]
@@ -197,7 +198,7 @@ class PolymarketScheduler:
                     reasoning=f"🔥 HOT: dropped {hs['drop']*100:.0f}% in 1h | potential +{hs['potential']*100:.0f}%",
                 )
 
-                signal_data = {
+                sig = {
                     "id": signal_id,
                     "market_id": market["id"],
                     "question": market["question"],
@@ -212,52 +213,21 @@ class PolymarketScheduler:
                     "token_id_yes": market.get("token_id_yes", ""),
                     "token_id_no": market.get("token_id_no", ""),
                 }
+                hot_signal_data.append(sig)
 
                 # Публикация в канал
                 chart_path = None
                 if self.chart_gen:
                     chart_path = await self.chart_gen.generate_probability_chart(market["id"])
-                await self.publisher.send_signal(signal_data, chart_path)
+                await self.publisher.send_signal(sig, chart_path)
                 await db.mark_signal_published(signal_id)
 
                 logger.info(f"🔥 HOT сигнал: '{market['question'][:50]}' drop {hs['drop']*100:.0f}%")
-
                 await asyncio.sleep(2)
 
-            # Автоставки для горячих сигналов
-            await self._run_auto_trades(
-                [{"id": hs_sig["id"], **hs_sig} for hs_sig in [
-                    {
-                        "id": await db.save_signal(
-                            market_id=hs["market"]["id"], signal_type="hot_dip",
-                            direction="BUY", confidence=0.85,
-                            probability_at_signal=hs["analysis"]["current_price"],
-                            probability_change=hs["analysis"]["change_1h"],
-                            reasoning="hot",
-                        ) if False else signal_data["id"],
-                        **signal_data,
-                    }
-                    for hs, signal_data in []  # уже обработали выше
-                ]] if False else []
-            )
-
-            # Простой вызов автоставок по горячим сигналам
-            auto_users = await db.get_auto_trade_users()
-            if auto_users:
-                # Пересоздаём signal_data для последнего горячего сигнала
-                for hs in hot_signals:
-                    market = hs["market"]
-                    analysis = hs["analysis"]
-                    sig = {
-                        "id": None,
-                        "market_id": market["id"],
-                        "question": market["question"],
-                        "direction": "BUY",
-                        "confidence": 0.85,
-                        "token_id_yes": market.get("token_id_yes", ""),
-                        "token_id_no": market.get("token_id_no", ""),
-                    }
-                    await self._run_auto_trades([sig])
+            # Автоставки по горячим сигналам
+            if hot_signal_data:
+                await self._run_auto_trades(hot_signal_data)
 
         except Exception as e:
             logger.error(f"Ошибка горячих сигналов: {e}")
