@@ -561,10 +561,10 @@ async def _show_settings(query):
 
     buttons = [
         strat_buttons,
-        [InlineKeyboardButton("$0.50", callback_data="set_amount_0.5"),
-         InlineKeyboardButton("$1", callback_data="set_amount_1"),
+        [InlineKeyboardButton("$1", callback_data="set_amount_1"),
          InlineKeyboardButton("$2", callback_data="set_amount_2"),
          InlineKeyboardButton("$5", callback_data="set_amount_5"),
+         InlineKeyboardButton("$10", callback_data="set_amount_10"),
          InlineKeyboardButton("✏️", callback_data="set_amount_custom")],
         [InlineKeyboardButton("Лимит $5", callback_data="set_daily_5"),
          InlineKeyboardButton("$10", callback_data="set_daily_10"),
@@ -605,8 +605,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if waiting == "custom_amount":
-        if value < 0.5:
-            await update.message.reply_text("❌ Минимум $0.50")
+        if value < 1:
+            await update.message.reply_text("❌ Минимум $1 (требование Polymarket)")
             return
         await db.set_auto_trade_settings(update.effective_user.id, amount=value)
         await update.message.reply_text(f"✅ Ставка: <b>${value:.2f}</b>\n\nНажми /start", parse_mode="HTML")

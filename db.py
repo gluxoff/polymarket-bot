@@ -77,7 +77,7 @@ async def init_db():
                 api_passphrase TEXT,
                 private_key TEXT,
                 auto_trade INTEGER DEFAULT 0,
-                auto_amount REAL DEFAULT 0.5,
+                auto_amount REAL DEFAULT 1.0,
                 auto_max_daily REAL DEFAULT 5.0,
                 auto_min_confidence REAL DEFAULT 0.7,
                 strategy TEXT DEFAULT 'contrarian',
