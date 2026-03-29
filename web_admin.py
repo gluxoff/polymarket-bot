@@ -20,9 +20,12 @@ async def start_web_admin(application):
     app.router.add_get("/api/trades", api_get_trades)
     app.router.add_get("/api/portfolio", api_get_portfolio)
     app.router.add_get("/api/users", api_get_users)
+    app.router.add_get("/api/pnl_history", api_pnl_history)
+    app.router.add_get("/api/live_stats", api_live_stats)
     app.router.add_post("/api/trade/close/{trade_id}", api_close_trade)
     app.router.add_get("/health", health_check)
-    app.router.add_get("/", index_page)
+    app.router.add_get("/", dashboard_page)
+    app.router.add_get("/settings", settings_page)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -135,6 +138,108 @@ async def api_get_users(request):
             "created_at": u.get("created_at", ""),
         })
     return web.json_response(safe)
+
+
+async def api_pnl_history(request):
+    """История P&L по сигналам для графика"""
+    async with __import__('aiosqlite').connect(config.DB_PATH) as conn:
+        conn.row_factory = __import__('aiosqlite').Row
+        cursor = await conn.execute('''
+            SELECT s.created_at as time,
+                   s.probability_at_signal as entry_price,
+                   s.probability_change as change,
+                   s.confidence,
+                   m.question,
+                   (SELECT ph.price_yes FROM price_history ph
+                    WHERE ph.market_id = s.market_id
+                    ORDER BY ph.recorded_at DESC LIMIT 1) as current_price
+            FROM signals s JOIN markets m ON s.market_id = m.id
+            ORDER BY s.created_at ASC
+        ''')
+        rows = [dict(r) for r in await cursor.fetchall()]
+
+    # Считаем кумулятивный P&L
+    cumulative = 0
+    bet = 50
+    result = []
+    for r in rows:
+        entry = r["entry_price"] or 0
+        current = r["current_price"] or entry
+        if entry > 0 and entry < 1:
+            pnl = (current - entry) * (bet / entry)
+            cumulative += pnl
+            result.append({
+                "time": r["time"],
+                "pnl": round(pnl, 2),
+                "cumulative": round(cumulative, 2),
+                "question": r["question"][:50] if r["question"] else "",
+                "confidence": r["confidence"],
+            })
+    return web.json_response(result)
+
+
+async def api_live_stats(request):
+    """Живая статистика для дашборда"""
+    import aiosqlite
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+
+        # Всего сигналов
+        cursor = await conn.execute("SELECT COUNT(*) as cnt FROM signals")
+        total_signals = (await cursor.fetchone())["cnt"]
+
+        # Сигналов сегодня
+        cursor = await conn.execute(
+            "SELECT COUNT(*) as cnt FROM signals WHERE DATE(created_at) = DATE('now')")
+        signals_today = (await cursor.fetchone())["cnt"]
+
+        # Рынков
+        cursor = await conn.execute("SELECT COUNT(*) as cnt FROM markets WHERE is_active = 1")
+        total_markets = (await cursor.fetchone())["cnt"]
+
+        # Win rate (по сигналам)
+        cursor = await conn.execute('''
+            SELECT s.probability_at_signal as entry,
+                   (SELECT ph.price_yes FROM price_history ph
+                    WHERE ph.market_id = s.market_id
+                    ORDER BY ph.recorded_at DESC LIMIT 1) as current
+            FROM signals s WHERE s.probability_at_signal > 0 AND s.probability_at_signal < 1
+        ''')
+        wins, losses, total_pnl = 0, 0, 0.0
+        bet = 50
+        for row in await cursor.fetchall():
+            entry = row["entry"] or 0
+            current = row["current"] or entry
+            if entry > 0:
+                pnl = (current - entry) * (bet / entry)
+                total_pnl += pnl
+                if pnl > 0:
+                    wins += 1
+                else:
+                    losses += 1
+
+        total_trades = wins + losses
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        roi = (total_pnl / (bet * total_trades) * 100) if total_trades > 0 else 0
+
+        # Подключённые юзеры
+        users = await db.get_connected_users()
+
+        # Последние 5 сигналов
+        recent = await db.get_recent_signals(5)
+
+    return web.json_response({
+        "total_signals": total_signals,
+        "signals_today": signals_today,
+        "total_markets": total_markets,
+        "total_pnl": round(total_pnl, 2),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(win_rate, 1),
+        "roi": round(roi, 1),
+        "connected_users": len(users),
+        "recent_signals": recent,
+    })
 
 
 async def api_close_trade(request):
@@ -264,9 +369,17 @@ async function saveSettings() {{
     return web.Response(text=html, content_type="text/html")
 
 
-# ── Основная админ-панель (когда бот работает) ────────────────
+# ── Дашборд ──────────────────────────────────────────────────
 
-async def index_page(request):
+async def dashboard_page(request):
+    """Красивый дашборд"""
+    html_path = config.BASE_DIR / "dashboard.html"
+    html = html_path.read_text(encoding="utf-8")
+    return web.Response(text=html, content_type="text/html")
+
+
+async def settings_page(request):
+    """Страница настроек (старая админка)"""
     token = request.query.get("token", "")
     html = f"""<!DOCTYPE html>
 <html lang="ru">

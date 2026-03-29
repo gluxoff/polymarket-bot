@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIFFERENTIAL — Polymarket Trading Engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'SF Mono',Monaco,'Cascadia Code',monospace;background:#0a0a0a;color:#e0e0e0;overflow-x:hidden}
+.header{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid #1a1a1a}
+.logo{font-size:18px;font-weight:700;letter-spacing:2px;color:#fff}
+.logo span{color:#555}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;animation:pulse 2s infinite}
+.status-dot.live{background:#00ff88}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.top-bar{display:flex;gap:24px;padding:12px 24px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;overflow-x:auto}
+.metric{text-align:center;min-width:100px}
+.metric-value{font-size:28px;font-weight:700;color:#fff}
+.metric-value.green{color:#00ff88}
+.metric-value.red{color:#ff4444}
+.metric-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+.main{display:grid;grid-template-columns:1fr 320px;gap:0;min-height:calc(100vh - 120px)}
+.chart-area{padding:24px;border-right:1px solid #1a1a1a}
+.sidebar{padding:16px;overflow-y:auto;max-height:calc(100vh - 120px)}
+.chart-title{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+canvas{width:100%!important;border-radius:8px;background:#0d0d0d}
+.signal-feed{list-style:none}
+.signal-item{padding:10px 12px;border-bottom:1px solid #1a1a1a;font-size:12px;transition:background .2s}
+.signal-item:hover{background:#111}
+.signal-time{color:#555;font-size:10px}
+.signal-question{color:#ccc;margin:4px 0}
+.signal-pnl{font-weight:700}
+.signal-pnl.pos{color:#00ff88}
+.signal-pnl.neg{color:#ff4444}
+.section-title{font-size:11px;color:#555;text-transform:uppercase;letter-spacing:2px;padding:12px 0 8px;border-bottom:1px solid #1a1a1a;margin-bottom:8px}
+.contracts-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+.contracts-table th{color:#555;text-align:left;padding:6px 8px;border-bottom:1px solid #1a1a1a;font-weight:400;text-transform:uppercase;letter-spacing:1px}
+.contracts-table td{padding:6px 8px;border-bottom:1px solid #0d0d0d}
+.contracts-table tr:hover{background:#111}
+.badge{padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600}
+.badge-win{background:#00ff8822;color:#00ff88}
+.badge-loss{background:#ff444422;color:#ff4444}
+.badge-open{background:#ffaa0022;color:#ffaa00}
+.footer{padding:8px 24px;border-top:1px solid #1a1a1a;font-size:10px;color:#333;display:flex;justify-content:space-between}
+.scan-indicator{display:flex;align-items:center;gap:6px;font-size:11px;color:#444}
+.formula{font-size:11px;color:#333;padding:8px 12px;border:1px solid #1a1a1a;border-radius:6px;margin-bottom:8px;font-family:'SF Mono',monospace}
+@media(max-width:768px){.main{grid-template-columns:1fr}.sidebar{max-height:none;border-top:1px solid #1a1a1a}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="header">
+    <div class="logo">DIFFERENTIAL <span>polymarket engine v3.0</span></div>
+    <div class="scan-indicator"><span class="status-dot live"></span> LIVE</div>
+</div>
+
+<div class="top-bar" id="metrics"></div>
+
+<div class="main">
+    <div class="chart-area">
+        <div class="chart-title">Cumulative P&L ($)</div>
+        <canvas id="pnlChart" height="300"></canvas>
+
+        <div class="chart-title" style="margin-top:24px">Active Contracts</div>
+        <table class="contracts-table" id="contracts-table">
+            <thead><tr><th>Time</th><th>Market</th><th>Entry</th><th>Current</th><th>P&L</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="sidebar">
+        <div class="section-title">Signal Feed</div>
+        <ul class="signal-feed" id="signal-feed"></ul>
+
+        <div class="section-title" style="margin-top:16px">Strategy</div>
+        <div class="formula">fx = (a·b − c) / b</div>
+        <div class="formula">Contrarian dip-buy</div>
+        <div class="formula">TP: +15% | TS: +25% → -10% | SL: -20%</div>
+
+        <div class="section-title" style="margin-top:16px">Config</div>
+        <div style="font-size:11px;color:#444;line-height:1.8">
+            <div>Scan interval: <span style="color:#888" id="cfg-scan">10m</span></div>
+            <div>Analysis: <span style="color:#888" id="cfg-analysis">60m</span></div>
+            <div>Categories: <span style="color:#888">politics, economics</span></div>
+            <div>Min drop: <span style="color:#888">8%</span></div>
+            <div>Price range: <span style="color:#888">20-65%</span></div>
+        </div>
+    </div>
+</div>
+
+<div class="footer">
+    <span>Watching <span id="watching">0</span> contracts</span>
+    <span id="last-update"></span>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const API = (p) => p + (p.includes('?')?'&':'?') + 'token=' + TOKEN;
+
+let chart = null;
+
+async function fetchJSON(p) {
+    const r = await fetch(API(p));
+    return r.json();
+}
+
+function initChart() {
+    const ctx = document.getElementById('pnlChart').getContext('2d');
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                data: [],
+                borderColor: '#00ff88',
+                backgroundColor: 'rgba(0,255,136,0.05)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: {
+                    grid: { color: '#1a1a1a' },
+                    ticks: { color: '#444', font: { size: 10, family: 'monospace' }, maxTicksLimit: 8 }
+                },
+                y: {
+                    grid: { color: '#1a1a1a' },
+                    ticks: {
+                        color: '#444',
+                        font: { size: 10, family: 'monospace' },
+                        callback: v => '$' + v.toFixed(0)
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function refresh() {
+    const [stats, pnl, signals] = await Promise.all([
+        fetchJSON('/api/live_stats'),
+        fetchJSON('/api/pnl_history'),
+        fetchJSON('/api/signals?limit=30'),
+    ]);
+
+    // Metrics bar
+    const pnlClass = stats.total_pnl >= 0 ? 'green' : 'red';
+    const pnlSign = stats.total_pnl >= 0 ? '+' : '';
+    document.getElementById('metrics').innerHTML = `
+        <div class="metric"><div class="metric-value">${stats.total_signals}</div><div class="metric-label">Signals</div></div>
+        <div class="metric"><div class="metric-value">${stats.win_rate}%</div><div class="metric-label">Win Rate</div></div>
+        <div class="metric"><div class="metric-value ${pnlClass}">${pnlSign}$${stats.total_pnl.toFixed(2)}</div><div class="metric-label">Total P&L</div></div>
+        <div class="metric"><div class="metric-value">${stats.roi >= 0 ? '+' : ''}${stats.roi}%</div><div class="metric-label">ROI</div></div>
+        <div class="metric"><div class="metric-value">${stats.wins}/${stats.losses}</div><div class="metric-label">W / L</div></div>
+        <div class="metric"><div class="metric-value">${stats.connected_users}</div><div class="metric-label">Users</div></div>
+        <div class="metric"><div class="metric-value">${stats.signals_today}</div><div class="metric-label">Today</div></div>
+    `;
+
+    // P&L Chart
+    if (pnl.length > 0) {
+        const lineColor = pnl[pnl.length-1].cumulative >= 0 ? '#00ff88' : '#ff4444';
+        chart.data.labels = pnl.map(p => p.time?.substring(11,16) || '');
+        chart.data.datasets[0].data = pnl.map(p => p.cumulative);
+        chart.data.datasets[0].borderColor = lineColor;
+        chart.data.datasets[0].backgroundColor = lineColor.replace('ff','22');
+        chart.update('none');
+    }
+
+    // Signal Feed
+    const feed = document.getElementById('signal-feed');
+    feed.innerHTML = signals.map(s => {
+        const change = ((s.probability_change || 0) * 100).toFixed(1);
+        const q = s.question?.substring(0, 45) || '';
+        return `<li class="signal-item">
+            <div class="signal-time">${s.created_at?.substring(11,16) || ''}</div>
+            <div class="signal-question">${q}</div>
+            <div><span class="badge badge-open">BUY</span> ${change}% | conf ${(s.confidence||0).toFixed(2)}</div>
+        </li>`;
+    }).join('');
+
+    // Contracts table (from signals with P&L)
+    const tbody = document.querySelector('#contracts-table tbody');
+    tbody.innerHTML = pnl.slice(-20).reverse().map(p => {
+        const cls = p.pnl >= 0 ? 'badge-win' : 'badge-loss';
+        const sign = p.pnl >= 0 ? '+' : '';
+        return `<tr>
+            <td>${p.time?.substring(11,16)||''}</td>
+            <td>${p.question}</td>
+            <td>—</td><td>—</td>
+            <td><span class="badge ${cls}">${sign}$${p.pnl.toFixed(2)}</span></td>
+            <td>${p.pnl >= 0 ? '✓' : '✗'}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('watching').textContent = stats.total_markets;
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+}
+
+initChart();
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>
