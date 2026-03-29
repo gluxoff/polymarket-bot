@@ -96,16 +96,20 @@ class UserClobClient:
                 partial(self._place_order_sync, token_id, side, size, price),
             )
         except Exception as e:
-            logger.error(f"Ошибка ордера: {e}")
+            logger.error(f"Ошибка ордера: {type(e).__name__}: {e}")
             return None
 
     def _place_order_sync(self, token_id: str, side: str, size: float, price: float) -> dict:
         from py_clob_client.order_builder.constants import BUY, SELL
         order_side = BUY if side.upper() == "BUY" else SELL
+        logger.info(f"CLOB order: token={token_id[:20]}, side={side}, size={size:.4f}, price={price:.4f}")
         order = self._client.create_order(
             token_id=token_id, price=price, size=size, side=order_side,
         )
-        return self._client.post_order(order)
+        logger.info(f"CLOB order created: {order}")
+        result = self._client.post_order(order)
+        logger.info(f"CLOB post result: {result}")
+        return result
 
     async def cancel_order(self, order_id: str) -> dict | None:
         if not self._client:
