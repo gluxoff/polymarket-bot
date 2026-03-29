@@ -266,28 +266,38 @@ class PolymarketScheduler:
         """Выполнить автоставки для юзеров с включённым auto_trade"""
         auto_users = await db.get_auto_trade_users()
         if not auto_users:
+            logger.info("Автоставки: нет юзеров с auto_trade=1")
             return
+
+        logger.info(f"Автоставки: {len(auto_users)} юзеров, {len(signals)} сигналов")
 
         from polymarket_client import PolymarketClient
         client: PolymarketClient = self.scanner.client
 
         for user in auto_users:
             try:
-                amount = user.get("auto_amount", 5.0)
-                max_daily = user.get("auto_max_daily", 50.0)
-                min_conf = user.get("auto_min_confidence", 0.6)
+                amount = user.get("auto_amount", 0.5)
+                max_daily = user.get("auto_max_daily", 10.0)
+                min_conf = user.get("auto_min_confidence", 0.7)
 
-                # Проверяем дневной лимит
-                user_stats = await db.get_user_portfolio_stats(user["id"])
-                today_pnl = await db.get_today_pnl()
-                today_spent = abs(today_pnl.get("total_pnl", 0)) + (user_stats.get("total_invested", 0))
+                # Считаем сколько уже потрачено сегодня
+                today_trades = await db.get_trade_history(limit=100, user_id=user["id"])
+                from datetime import datetime
+                today_str = datetime.utcnow().strftime("%Y-%m-%d")
+                today_spent = sum(
+                    t["size_usdc"] for t in today_trades
+                    if t.get("created_at", "").startswith(today_str)
+                )
+
+                logger.info(f"Автоставки: юзер {user['telegram_id']} — потрачено сегодня ${today_spent:.2f}/{max_daily:.0f}, ставка ${amount:.2f}, мин.увер. {min_conf}")
 
                 trades_placed = 0
                 for signal in signals:
                     if signal["confidence"] < min_conf:
+                        logger.info(f"Автоставки: пропуск — уверенность {signal['confidence']:.2f} < {min_conf}")
                         continue
                     if today_spent + amount > max_daily:
-                        logger.info(f"Автоставки: юзер {user['telegram_id']} — дневной лимит ${max_daily}")
+                        logger.info(f"Автоставки: дневной лимит ${max_daily} достигнут")
                         break
 
                     # Получаем CLOB клиент юзера
@@ -306,14 +316,19 @@ class PolymarketScheduler:
                     # Определяем токен
                     token_id = signal.get("token_id_yes") if signal["direction"] == "BUY" else signal.get("token_id_no")
                     if not token_id:
+                        logger.warning(f"Автоставки: нет token_id для сигнала")
                         continue
 
                     price = await client.get_midpoint(token_id)
+                    logger.info(f"Автоставки: цена midpoint для {token_id[:16]}... = {price}")
                     if not price or price <= 0 or price >= 1:
+                        logger.warning(f"Автоставки: невалидная цена {price}")
                         continue
 
                     shares = amount / price
+                    logger.info(f"Автоставки: размещаю ордер BUY {shares:.4f} shares @ {price:.4f} (${amount:.2f})")
                     result = await user_clob.place_order(token_id, "BUY", shares, price)
+                    logger.info(f"Автоставки: результат ордера = {result}")
 
                     if result:
                         order_id = result.get("orderID", result.get("id", ""))
