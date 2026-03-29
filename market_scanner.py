@@ -45,9 +45,20 @@ class MarketScanner:
                         if not condition_id:
                             continue
 
-                        # Token IDs
+                        # Token IDs (может быть JSON строкой или списком)
+                        import json as _json
                         clob_token_ids = market.get("clobTokenIds", [])
+                        if isinstance(clob_token_ids, str):
+                            try:
+                                clob_token_ids = _json.loads(clob_token_ids)
+                            except (ValueError, TypeError):
+                                clob_token_ids = []
                         outcomes = market.get("outcomes", [])
+                        if isinstance(outcomes, str):
+                            try:
+                                outcomes = _json.loads(outcomes)
+                            except (ValueError, TypeError):
+                                outcomes = []
 
                         token_yes = ""
                         token_no = ""
