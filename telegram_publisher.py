@@ -113,6 +113,7 @@ class TelegramPublisher:
             "gpt_analysis": "AI-анализ",
             "contrarian_dip": "Покупка на просадке",
             "contrarian_volume": "Просадка + объём",
+            "hot_dip": "🔥 Горячая просадка",
         }
         type_text = type_labels.get(signal_type, signal_type)
 

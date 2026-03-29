@@ -122,14 +122,145 @@ class PolymarketScheduler:
     # ── Задачи ───────────────────────────────────────────────
 
     async def _run_scan(self):
-        """Сканирование + обновление цен"""
+        """Сканирование + обновление цен + мгновенные сигналы при сильных просадках"""
         if self.is_paused:
             return
         try:
             await self.scanner.scan_markets()
             await self.scanner.update_prices()
+
+            # Проверяем на горячие сигналы (сильная просадка >15%)
+            await self._check_hot_signals()
         except Exception as e:
             logger.error(f"Ошибка сканирования: {e}")
+
+    async def _check_hot_signals(self):
+        """Мгновенные сигналы — если найдена сильная просадка, не ждём часового анализа"""
+        try:
+            from signal_generator import SignalGenerator
+            from analytics_engine import AnalyticsEngine
+
+            # Ищем движения с повышенным порогом
+            movements = await self.analytics.detect_significant_movements()
+            if not movements:
+                return
+
+            hot_signals = []
+            for item in movements:
+                analysis = item["analysis"]
+                market = item["market"]
+                change = analysis["change_1h"]
+
+                # Только сильные просадки: >15% падение, цена 20-65%
+                if change >= 0:
+                    continue
+                if abs(change) < 0.15:
+                    continue
+                price = analysis["current_price"]
+                if price < 0.20 or price > 0.65:
+                    continue
+
+                # Проверяем что не мусор
+                from signal_generator import TRASH_PATTERNS
+                q = market.get("question", "").lower()
+                if any(p in q for p in TRASH_PATTERNS):
+                    continue
+
+                potential = (1.0 - price) / price
+                hot_signals.append({
+                    "market": market,
+                    "analysis": analysis,
+                    "drop": abs(change),
+                    "potential": potential,
+                })
+
+            if not hot_signals:
+                return
+
+            # Берём топ-2 самых жирных
+            hot_signals.sort(key=lambda s: s["drop"] * s["potential"], reverse=True)
+            hot_signals = hot_signals[:2]
+
+            logger.info(f"🔥 Найдено {len(hot_signals)} горячих сигналов!")
+
+            for hs in hot_signals:
+                market = hs["market"]
+                analysis = hs["analysis"]
+
+                signal_id = await db.save_signal(
+                    market_id=market["id"],
+                    signal_type="hot_dip",
+                    direction="BUY",
+                    confidence=0.85,
+                    probability_at_signal=analysis["current_price"],
+                    probability_change=analysis["change_1h"],
+                    reasoning=f"🔥 HOT: dropped {hs['drop']*100:.0f}% in 1h | potential +{hs['potential']*100:.0f}%",
+                )
+
+                signal_data = {
+                    "id": signal_id,
+                    "market_id": market["id"],
+                    "question": market["question"],
+                    "category": market.get("category", ""),
+                    "polymarket_url": market.get("polymarket_url", ""),
+                    "signal_type": "hot_dip",
+                    "direction": "BUY",
+                    "confidence": 0.85,
+                    "probability_at_signal": analysis["current_price"],
+                    "probability_change": analysis["change_1h"],
+                    "reasoning": f"🔥 HOT: dropped {hs['drop']*100:.0f}% in 1h | potential +{hs['potential']*100:.0f}%",
+                    "token_id_yes": market.get("token_id_yes", ""),
+                    "token_id_no": market.get("token_id_no", ""),
+                }
+
+                # Публикация в канал
+                chart_path = None
+                if self.chart_gen:
+                    chart_path = await self.chart_gen.generate_probability_chart(market["id"])
+                await self.publisher.send_signal(signal_data, chart_path)
+                await db.mark_signal_published(signal_id)
+
+                logger.info(f"🔥 HOT сигнал: '{market['question'][:50]}' drop {hs['drop']*100:.0f}%")
+
+                await asyncio.sleep(2)
+
+            # Автоставки для горячих сигналов
+            await self._run_auto_trades(
+                [{"id": hs_sig["id"], **hs_sig} for hs_sig in [
+                    {
+                        "id": await db.save_signal(
+                            market_id=hs["market"]["id"], signal_type="hot_dip",
+                            direction="BUY", confidence=0.85,
+                            probability_at_signal=hs["analysis"]["current_price"],
+                            probability_change=hs["analysis"]["change_1h"],
+                            reasoning="hot",
+                        ) if False else signal_data["id"],
+                        **signal_data,
+                    }
+                    for hs, signal_data in []  # уже обработали выше
+                ]] if False else []
+            )
+
+            # Простой вызов автоставок по горячим сигналам
+            auto_users = await db.get_auto_trade_users()
+            if auto_users:
+                # Пересоздаём signal_data для последнего горячего сигнала
+                for hs in hot_signals:
+                    market = hs["market"]
+                    analysis = hs["analysis"]
+                    sig = {
+                        "id": None,
+                        "market_id": market["id"],
+                        "question": market["question"],
+                        "direction": "BUY",
+                        "confidence": 0.85,
+                        "token_id_yes": market.get("token_id_yes", ""),
+                        "token_id_no": market.get("token_id_no", ""),
+                    }
+                    await self._run_auto_trades([sig])
+
+        except Exception as e:
+            logger.error(f"Ошибка горячих сигналов: {e}")
 
     async def _run_analysis(self):
         """Анализ + генерация сигналов + публикация"""
