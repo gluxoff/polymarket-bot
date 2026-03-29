@@ -119,6 +119,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user
+
+    # Проверка доступа
+    allowed = await db.is_user_allowed(user.id)
+    if not allowed:
+        await update.message.reply_text(
+            "🔒 Доступ закрыт.\n\nОбратись к администратору для получения доступа.\n"
+            f"Твой ID: <code>{user.id}</code>",
+            parse_mode="HTML",
+        )
+        return
+
     await db.save_user(user.id, user.username or "")
 
     text, keyboard = await _build_main_menu(user.id)
@@ -156,6 +167,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("✅ Аккаунт отключён.\n\n" + text, parse_mode="HTML", reply_markup=kb)
         elif data == "autotrade_toggle":
             await _toggle_autotrade(query)
+        elif data == "set_amount_custom":
+            await query.edit_message_text(
+                "✏️ Отправь сумму ставки в долларах (например: <b>3.5</b>):",
+                parse_mode="HTML",
+            )
+            context.user_data["waiting_for"] = "custom_amount"
+        elif data == "set_daily_custom":
+            await query.edit_message_text(
+                "✏️ Отправь дневной лимит в долларах (например: <b>15</b>):",
+                parse_mode="HTML",
+            )
+            context.user_data["waiting_for"] = "custom_daily"
         elif data.startswith("set_amount_"):
             amount = float(data.split("_")[2])
             await db.set_auto_trade_settings(query.from_user.id, amount=amount)
@@ -541,11 +564,13 @@ async def _show_settings(query):
         [InlineKeyboardButton("$0.50", callback_data="set_amount_0.5"),
          InlineKeyboardButton("$1", callback_data="set_amount_1"),
          InlineKeyboardButton("$2", callback_data="set_amount_2"),
-         InlineKeyboardButton("$5", callback_data="set_amount_5")],
+         InlineKeyboardButton("$5", callback_data="set_amount_5"),
+         InlineKeyboardButton("✏️", callback_data="set_amount_custom")],
         [InlineKeyboardButton("Лимит $5", callback_data="set_daily_5"),
          InlineKeyboardButton("$10", callback_data="set_daily_10"),
          InlineKeyboardButton("$25", callback_data="set_daily_25"),
-         InlineKeyboardButton("$50", callback_data="set_daily_50")],
+         InlineKeyboardButton("$50", callback_data="set_daily_50"),
+         InlineKeyboardButton("✏️", callback_data="set_daily_custom")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_back")],
     ]
 
@@ -560,6 +585,37 @@ async def _toggle_autotrade(query):
     await db.set_auto_trade(query.from_user.id, new_state)
     text, kb = await _build_main_menu(query.from_user.id)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового ввода (кастомные суммы)"""
+    if not _is_private(update):
+        return
+
+    waiting = context.user_data.pop("waiting_for", None)
+    if not waiting:
+        return
+
+    text = update.message.text.strip()
+
+    try:
+        value = float(text.replace(",", "."))
+    except ValueError:
+        await update.message.reply_text("❌ Введи число. Попробуй /start")
+        return
+
+    if waiting == "custom_amount":
+        if value < 0.5:
+            await update.message.reply_text("❌ Минимум $0.50")
+            return
+        await db.set_auto_trade_settings(update.effective_user.id, amount=value)
+        await update.message.reply_text(f"✅ Ставка: <b>${value:.2f}</b>\n\nНажми /start", parse_mode="HTML")
+    elif waiting == "custom_daily":
+        if value < 1:
+            await update.message.reply_text("❌ Минимум $1")
+            return
+        await db.set_auto_trade_settings(update.effective_user.id, max_daily=value)
+        await update.message.reply_text(f"✅ Лимит: <b>${value:.0f}/день</b>\n\nНажми /start", parse_mode="HTML")
 
 
 async def _show_help(query):
@@ -1023,6 +1079,62 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _scheduler:
         _scheduler.is_paused = False
         await update.message.reply_text("▶️ Бот возобновлён")
+
+
+# ── Управление доступом (админ) ──────────────────────────────
+
+async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/adduser <telegram_id> — дать доступ юзеру"""
+    if not _is_admin(update):
+        return
+    args = context.args
+    if not args:
+        await update.message.reply_text("Использование: /adduser <telegram_id>")
+        return
+    try:
+        tid = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Неверный ID")
+        return
+    await db.add_allowed_user(tid)
+    await update.message.reply_text(f"✅ Юзер <code>{tid}</code> добавлен", parse_mode="HTML")
+
+
+async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/removeuser <telegram_id> — убрать доступ"""
+    if not _is_admin(update):
+        return
+    args = context.args
+    if not args:
+        await update.message.reply_text("Использование: /removeuser <telegram_id>")
+        return
+    try:
+        tid = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Неверный ID")
+        return
+    await db.remove_allowed_user(tid)
+    await update.message.reply_text(f"✅ Юзер <code>{tid}</code> удалён", parse_mode="HTML")
+
+
+async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/users — список допущенных"""
+    if not _is_admin(update):
+        return
+    allowed = await db.get_allowed_users()
+    connected = await db.get_connected_users()
+    connected_ids = {u["telegram_id"] for u in connected}
+
+    if not allowed:
+        await update.message.reply_text("Список пуст. Добавь: /adduser <id>")
+        return
+
+    lines = ["👥 <b>Допущенные юзеры</b>\n"]
+    for tid in allowed:
+        status = "🟢 подключён" if tid in connected_ids else "⚪ не подключён"
+        lines.append(f"<code>{tid}</code> — {status}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 # ── ConversationHandler для /connect ─────────────────────────

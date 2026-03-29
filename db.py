@@ -85,6 +85,11 @@ async def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                telegram_id INTEGER PRIMARY KEY,
+                added_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS daily_pnl (
                 date TEXT PRIMARY KEY,
                 total_pnl REAL DEFAULT 0,
@@ -208,6 +213,45 @@ async def get_auto_trade_users() -> list[dict]:
             "SELECT * FROM users WHERE (api_key IS NOT NULL OR private_key IS NOT NULL) AND auto_trade = 1 AND is_active = 1"
         )
         return [dict(row) for row in await cursor.fetchall()]
+
+
+# ── Access Control ────────────────────────────────────────────
+
+async def is_user_allowed(telegram_id: int) -> bool:
+    """Проверить есть ли юзер в списке допущенных (или он админ)"""
+    if telegram_id == config.ADMIN_TELEGRAM_ID:
+        return True
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        cursor = await conn.execute(
+            "SELECT 1 FROM allowed_users WHERE telegram_id = ?", (telegram_id,)
+        )
+        return await cursor.fetchone() is not None
+
+
+async def add_allowed_user(telegram_id: int):
+    """Добавить юзера в список допущенных"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO allowed_users (telegram_id) VALUES (?)",
+            (telegram_id,),
+        )
+        await conn.commit()
+
+
+async def remove_allowed_user(telegram_id: int):
+    """Убрать юзера из списка допущенных"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        await conn.execute(
+            "DELETE FROM allowed_users WHERE telegram_id = ?", (telegram_id,),
+        )
+        await conn.commit()
+
+
+async def get_allowed_users() -> list[int]:
+    """Список допущенных юзеров"""
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        cursor = await conn.execute("SELECT telegram_id FROM allowed_users")
+        return [row[0] for row in await cursor.fetchall()]
 
 
 # ── Markets ──────────────────────────────────────────────────

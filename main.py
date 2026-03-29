@@ -4,7 +4,7 @@ import asyncio
 import sys
 
 from loguru import logger
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 import config
 import db
@@ -161,12 +161,18 @@ def main():
     app.add_handler(CommandHandler("close", telegram_commands.cmd_close))
     app.add_handler(CommandHandler("markets", telegram_commands.cmd_markets))
 
+    # Обработка текстового ввода (кастомные суммы)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, telegram_commands.handle_text_input))
+
     # Админские команды
     app.add_handler(CommandHandler("status", telegram_commands.cmd_status))
     app.add_handler(CommandHandler("signals", telegram_commands.cmd_signals))
     app.add_handler(CommandHandler("scan", telegram_commands.cmd_scan))
     app.add_handler(CommandHandler("pause", telegram_commands.cmd_pause))
     app.add_handler(CommandHandler("resume", telegram_commands.cmd_resume))
+    app.add_handler(CommandHandler("adduser", telegram_commands.cmd_adduser))
+    app.add_handler(CommandHandler("removeuser", telegram_commands.cmd_removeuser))
+    app.add_handler(CommandHandler("users", telegram_commands.cmd_users))
 
     logger.info("Бот запущен, ожидание команд...")
     app.run_polling(drop_pending_updates=True)
