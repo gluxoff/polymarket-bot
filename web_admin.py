@@ -22,6 +22,7 @@ async def start_web_admin(application):
     app.router.add_get("/api/users", api_get_users)
     app.router.add_get("/api/pnl_history", api_pnl_history)
     app.router.add_get("/api/live_stats", api_live_stats)
+    app.router.add_get("/api/market_movers", api_market_movers)
     app.router.add_post("/api/trade/close/{trade_id}", api_close_trade)
     app.router.add_get("/health", health_check)
     app.router.add_get("/", dashboard_page)
@@ -240,6 +241,40 @@ async def api_live_stats(request):
         "connected_users": len(users),
         "recent_signals": recent,
     })
+
+
+async def api_market_movers(request):
+    """Топ рынков по изменению цены за последний час"""
+    import aiosqlite
+    async with aiosqlite.connect(config.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute('''
+            SELECT m.id, m.question, m.category,
+                   p1.price_yes as current_price,
+                   p2.price_yes as old_price
+            FROM markets m
+            JOIN (SELECT market_id, price_yes, MAX(recorded_at) as t FROM price_history GROUP BY market_id) p1 ON p1.market_id = m.id
+            LEFT JOIN price_history p2 ON p2.market_id = m.id AND p2.recorded_at <= datetime(p1.t, '-1 hour')
+            WHERE m.is_active = 1 AND p1.price_yes > 0 AND p2.price_yes > 0
+            ORDER BY ABS(p1.price_yes - p2.price_yes) DESC
+            LIMIT 20
+        ''')
+        rows = [dict(r) for r in await cursor.fetchall()]
+
+    result = []
+    for r in rows:
+        cur = r["current_price"] or 0
+        old = r["old_price"] or cur
+        change = cur - old
+        if abs(change) < 0.01:
+            continue
+        result.append({
+            "question": r["question"][:50] if r["question"] else "",
+            "category": r["category"] or "",
+            "price": round(cur * 100, 1),
+            "change": round(change * 100, 1),
+        })
+    return web.json_response(result[:15])
 
 
 async def api_close_trade(request):
