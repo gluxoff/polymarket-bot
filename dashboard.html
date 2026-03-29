@@ -20,8 +20,9 @@ body{font-family:'SF Mono',Monaco,'Courier New',monospace;background:#060608;col
 
 /* Ticker */
 .ticker{overflow:hidden;height:30px;border-bottom:1px solid #151518;background:#08080a}
-.ticker-in{display:flex;gap:20px;animation:tk 40s linear infinite;white-space:nowrap;padding:7px 0}
+.ticker-in{display:flex;gap:20px;animation:tk 15s linear infinite;white-space:nowrap;padding:7px 0}
 @keyframes tk{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
 .ti{font-size:11px;color:#444;display:flex;gap:4px}
 .ti .q{color:#555}
 .ti .v{font-weight:600}
@@ -53,8 +54,8 @@ canvas.ch{width:100%!important;background:transparent}
 .matrix-col{position:relative;overflow:hidden;border-right:1px solid #151518}
 .matrix-col:last-child{border-right:none}
 .matrix-col .matrix-label{position:absolute;top:4px;left:8px;font-size:8px;color:#252528;letter-spacing:2px;z-index:2}
-.matrix-scroll{animation:matrixDown 30s linear infinite}
-.matrix-scroll2{animation:matrixDown 25s linear infinite}
+.matrix-scroll{animation:matrixDown 8s linear infinite}
+.matrix-scroll2{animation:matrixDown 6s linear infinite}
 @keyframes matrixDown{0%{transform:translateY(0)}100%{transform:translateY(-50%)}}
 .mx-row{padding:4px 8px;font-size:10px;line-height:1.6;border-bottom:1px solid #0a0a0c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mx-row .mx-t{color:#1e1e22;font-size:8px;margin-right:4px}
