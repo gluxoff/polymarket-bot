@@ -8,18 +8,29 @@ import db
 from analytics_engine import AnalyticsEngine
 
 TRASH_PATTERNS = [
+    # Дневные рынки — казино, не торгуем
+    "up or down on", "up or down on march", "up or down on april",
+    "open up or down", "close over", "close under",
+    "s&p 500 (spx)", "spy (spy)", "nasdaq 100 (ndx)",
+    "dow jones (djia)", "(djia)", "(ndx)", "(spx)",
+    # Речь/слова
     "will trump say", "will biden say", "will elon say",
     "will mrbeast say", "said during",
     'say "', "say '", "be said",
     "during the next episode", "during his next video",
     "during the fii", "during the press conference",
     "at the rally", "at the rotterdam", "grand final",
+    "will trump post", "truth social",
+    # Погода/спорт
     "highest temperature", "lowest temperature", "weather",
     "cricket", "legends cricket", "ipl",
     "set 1 winner", "set 1 games", "o/u",
+    # Биржевые таргеты
     "hit 41", "hit 42", "hit 40", "hit 35", "hit 7",
     "(low)", "(high)",
+    # Прочий мусор
     "full lid", "white house call",
+    "talk to", "visit", "dance during",
 ]
 
 MAX_SIGNALS_PER_CYCLE = 3
