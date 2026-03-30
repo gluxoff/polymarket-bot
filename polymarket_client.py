@@ -59,18 +59,12 @@ class UserClobClient:
         from py_clob_client.client import ClobClient
 
         if self.private_key:
-            # Подключение по приватному ключу
-            # signature_type=2 + funder = proxy wallet на Polymarket
-            from eth_account import Account
-            acc = Account.from_key(self.private_key)
-            funder_address = acc.address
-
+            # Подключение по приватному ключу (EOA, signature_type=0)
             client = ClobClient(
                 config.CLOB_API_URL,
                 key=self.private_key,
                 chain_id=config.POLYMARKET_CHAIN_ID,
-                signature_type=2,
-                funder=funder_address,
+                signature_type=0,
             )
             client.set_api_creds(client.create_or_derive_api_creds())
             return client

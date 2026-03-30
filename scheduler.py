@@ -334,7 +334,13 @@ class PolymarketScheduler:
                         continue
 
                     shares = amount / price
-                    logger.info(f"Автоставки: размещаю ордер BUY {shares:.4f} shares @ {price:.4f} (${amount:.2f})")
+                    # Polymarket минимум 5 shares
+                    if shares < 5:
+                        shares = 5.0
+                        amount = shares * price
+                    # Округляем цену до 0.01
+                    price = round(price, 2)
+                    logger.info(f"Автоставки: размещаю ордер BUY {shares:.2f} shares @ {price:.2f} (${amount:.2f})")
                     result = await user_clob.place_order(token_id, "BUY", shares, price)
                     logger.info(f"Автоставки: результат ордера = {result}")
 
