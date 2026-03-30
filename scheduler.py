@@ -355,7 +355,7 @@ class PolymarketScheduler:
                             size_usdc=amount,
                             price=price,
                             order_id=order_id,
-                            status="filled",
+                            status="pending",
                         )
                         trades_placed += 1
                         today_spent += amount
@@ -366,13 +366,16 @@ class PolymarketScheduler:
                     await asyncio.sleep(1)
 
                 if trades_placed:
-                    # Уведомляем юзера
                     try:
                         from telegram import Bot
                         bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
                         await bot.send_message(
                             chat_id=user["telegram_id"],
-                            text=f"🤖 Автоставки: размещено <b>{trades_placed}</b> ставок по ${amount:.0f}",
+                            text=(
+                                f"🤖 <b>Ордера размещены: {trades_placed}</b>\n\n"
+                                f"Статус: ожидают исполнения\n"
+                                f"Бот уведомит когда исполнятся или истекут"
+                            ),
                             parse_mode="HTML",
                         )
                     except Exception:

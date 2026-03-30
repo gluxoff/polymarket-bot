@@ -119,6 +119,19 @@ class UserClobClient:
         logger.info(f"CLOB post result: {result}")
         return result
 
+    async def get_order(self, order_id: str) -> dict | None:
+        """Получить статус ордера"""
+        if not self._client:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, partial(self._client.get_order, order_id),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка получения ордера: {e}")
+            return None
+
     async def cancel_order(self, order_id: str) -> dict | None:
         if not self._client:
             return None
