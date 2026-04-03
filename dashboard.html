@@ -80,7 +80,10 @@ canvas.ch{width:100%!important;background:transparent}
 <div class="w">
 <div class="hd">
     <div class="logo">DIFFERENTIAL <sub>v3</sub></div>
-    <div class="live"><div class="dot"></div>LIVE</div>
+    <div style="display:flex;align-items:center;gap:16px">
+        <div style="font-size:12px;color:#555;letter-spacing:1px" id="hd-date"></div>
+        <div class="live"><div class="dot"></div>LIVE</div>
+    </div>
 </div>
 <div class="ticker"><div class="ticker-in" id="ticker"></div></div>
 <div class="ms" id="metrics"></div>
@@ -187,7 +190,7 @@ for (let d = 0; d < totalDays; d++) {
     const dateShort = fmtDateShort(date);
     const rng = seededRand(date.getTime() / 86400000 | 0);
 
-    const dailyTrades = 12 + Math.floor(rng() * 8); // 12-20 trades/day
+    const dailyTrades = 35 + Math.floor(rng() * 15); // 35-50 trades/day
     let dayPnl = 0;
 
     for (let t = 0; t < dailyTrades; t++) {
@@ -195,10 +198,10 @@ for (let d = 0; d < totalDays; d++) {
         const min = Math.floor(rng() * 60);
         const market = markets[Math.floor(rng() * markets.length)];
         const entry = 0.15 + rng() * 0.50;
-        const isWin = rng() < 0.64;
-        const changePct = isWin ? (0.05 + rng() * 0.25) : -(0.05 + rng() * 0.18);
+        const isWin = rng() < 0.68; // 68% win rate
+        const changePct = isWin ? (0.08 + rng() * 0.35) : -(0.04 + rng() * 0.12);
         const exit = Math.max(0.01, Math.min(0.99, entry + changePct));
-        const shares = 5 + Math.floor(rng() * 15);
+        const shares = 20 + Math.floor(rng() * 80); // bigger positions
         const pnl = (exit - entry) * shares;
         cumPnl += pnl;
         dayPnl += pnl;
@@ -318,6 +321,7 @@ function render() {
         return `<li class="si ${hot?'hot':s.isWin?'win':''}"><div class="si-t">${s.time}</div><div class="si-q">${s.market.substring(0,38)}</div><div class="si-m">${hot?'<span class="b b-h">HOT</span>':'<span class="b b-b">BUY</span>'} <span class="b ${s.isWin?'b-w':'b-l'}">${s.pnl>=0?'+':''}$${s.pnl.toFixed(2)}</span> <span style="color:#222">c:${conf}</span></div></li>`;
     }).join('');
 
+    document.getElementById('hd-date').textContent = todayStr;
     document.getElementById('scan-n').textContent = '15,247 mkts';
     document.getElementById('ft-l').textContent = `Watching 15,247 contracts | ${todayStr}`;
     document.getElementById('ft-r').textContent = new Date().toLocaleTimeString();
