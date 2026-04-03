@@ -3,33 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>DIFFERENTIAL</title>
+<title>DIFFERENTIAL — Polymarket Trading Engine</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:'SF Mono',Monaco,'Courier New',monospace;background:#060608;color:#ccc;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body{font-family:'SF Mono',Monaco,'Courier New',monospace;background:#060608;color:#ccc;overflow-x:hidden}
 #bg{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;opacity:.1;pointer-events:none}
 .w{position:relative;z-index:1}
-
-/* Header */
 .hd{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #151518;background:rgba(6,6,8,.95)}
 .logo{font-size:14px;font-weight:700;letter-spacing:3px;color:#fff}
 .logo sub{font-size:9px;color:#333;letter-spacing:1px;font-weight:400;vertical-align:baseline}
 .live{display:flex;align-items:center;gap:6px;font-size:10px;color:#00ff88}
 .dot{width:6px;height:6px;border-radius:50%;background:#00ff88;box-shadow:0 0 8px #00ff88;animation:p 2s infinite}
 @keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
-
-/* Ticker */
 .ticker{overflow:hidden;height:30px;border-bottom:1px solid #151518;background:#08080a}
 .ticker-in{display:flex;gap:20px;animation:tk 15s linear infinite;white-space:nowrap;padding:7px 0}
 @keyframes tk{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-
 .ti{font-size:11px;color:#444;display:flex;gap:4px}
-.ti .q{color:#555}
-.ti .v{font-weight:600}
-.ti .v.u{color:#00ff88}
-.ti .v.d{color:#ff3344}
-
-/* Metrics */
+.ti .q{color:#555}.ti .v{font-weight:600}.ti .v.u{color:#00ff88}.ti .v.d{color:#ff3344}
 .ms{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #151518}
 .mg{text-align:center;padding:12px 4px;border-right:1px solid #151518}
 .mg:last-child{border-right:none}
@@ -37,19 +27,13 @@ body{font-family:'SF Mono',Monaco,'Courier New',monospace;background:#060608;col
 .mg .n.g{color:#00ff88;text-shadow:0 0 12px rgba(0,255,136,.15)}
 .mg .n.r{color:#ff3344}
 .mg .l{font-size:8px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
-
-/* Scanner */
 .scan{height:60px;position:relative;overflow:hidden;border-bottom:1px solid #151518}
 #scanC{width:100%;height:100%}
 .scan-l{position:absolute;top:5px;left:8px;font-size:8px;color:#252528;letter-spacing:2px}
 .scan-r{position:absolute;top:5px;right:8px;font-size:8px;color:#00ff8844}
-
-/* Chart */
 .chart-wrap{padding:12px;border-bottom:1px solid #151518}
 .chart-t{font-size:9px;color:#333;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
 canvas.ch{width:100%!important;background:transparent}
-
-/* Matrix columns */
 .matrix-wrap{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #151518;height:280px;overflow:hidden}
 .matrix-col{position:relative;overflow:hidden;border-right:1px solid #151518}
 .matrix-col:last-child{border-right:none}
@@ -67,14 +51,11 @@ canvas.ch{width:100%!important;background:transparent}
 .mx-row.active{background:rgba(0,255,136,.03)}
 .mx-row.active .mx-q{color:#555}
 .mx-row.active .mx-act{color:#00ff88}
-
-/* Section */
 .sec-t{font-size:9px;color:#252528;text-transform:uppercase;letter-spacing:2px;padding:10px 12px;border-bottom:1px solid #151518;background:#08080a}
-
-/* Signals */
 .sf{list-style:none}
-.si{padding:10px 12px;border-bottom:1px solid #0c0c0e;font-size:12px;border-left:2px solid transparent}
+.si{padding:8px 12px;border-bottom:1px solid #0c0c0e;font-size:11px;border-left:2px solid transparent}
 .si.hot{border-left-color:#ff6600;background:rgba(255,102,0,.02)}
+.si.win{border-left-color:#00ff88}
 .si-t{color:#2a2a2e;font-size:9px}
 .si-q{color:#666;margin:3px 0;line-height:1.4}
 .si-m{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -83,66 +64,54 @@ canvas.ch{width:100%!important;background:transparent}
 .b-b{background:rgba(0,136,255,.1);color:#0088ff}
 .b-w{background:rgba(0,255,136,.1);color:#00ff88}
 .b-l{background:rgba(255,51,68,.1);color:#ff3344}
-
-/* Trades table */
 .tr-wrap{padding:8px 12px}
-.tr{width:100%;border-collapse:collapse;font-size:11px}
+.tr{width:100%;border-collapse:collapse;font-size:10px}
 .tr th{color:#252528;text-align:left;padding:6px 4px;border-bottom:1px solid #151518;font-weight:400;text-transform:uppercase;letter-spacing:1px;font-size:8px}
 .tr td{padding:6px 4px;border-bottom:1px solid #0a0a0c;color:#444}
-
-/* Formulas */
 .fm{font-size:10px;color:#222;padding:6px 10px;border:1px solid #151518;border-radius:3px;margin:4px 12px}
-
-.footer{padding:6px 16px;border-top:1px solid #151518;font-size:8px;color:#1a1a1e;display:flex;justify-content:space-between}
-
-/* Desktop: 2 columns */
-@media(min-width:768px){
-    .content{display:grid;grid-template-columns:1fr 340px}
-    .col-r{border-left:1px solid #151518}
-    .ms{grid-template-columns:repeat(7,1fr)}
-    .hm{grid-template-columns:repeat(12,1fr)}
-}
+.footer{padding:6px 16px;border-top:1px solid #151518;font-size:8px;color:#1a1a1e;display:flex;justify-content:space-between;background:rgba(6,6,8,.95)}
+.content{display:block}
+@media(min-width:768px){.content{display:grid;grid-template-columns:1fr 340px}.col-r{border-left:1px solid #151518}.ms{grid-template-columns:repeat(7,1fr)}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <canvas id="bg"></canvas>
 <div class="w">
-
 <div class="hd">
     <div class="logo">DIFFERENTIAL <sub>v3</sub></div>
     <div class="live"><div class="dot"></div>LIVE</div>
 </div>
-
 <div class="ticker"><div class="ticker-in" id="ticker"></div></div>
 <div class="ms" id="metrics"></div>
-
 <div class="content">
 <div class="col-l">
     <div class="scan"><canvas id="scanC"></canvas><div class="scan-l">AI SCANNER</div><div class="scan-r" id="scan-n"></div></div>
-    <div class="chart-wrap"><div class="chart-t">Cumulative P&L</div><div style="height:120px"><canvas id="pnlChart" class="ch"></canvas></div></div>
+    <div class="chart-wrap"><div class="chart-t">Equity Curve</div><div style="height:120px"><canvas id="pnlChart" class="ch"></canvas></div></div>
     <div class="matrix-wrap">
         <div class="matrix-col"><div class="matrix-label">SCANNING</div><div class="matrix-scroll" id="matrix1"></div></div>
         <div class="matrix-col"><div class="matrix-label">ANALYZING</div><div class="matrix-scroll2" id="matrix2"></div></div>
     </div>
-    <div class="sec-t">Trades</div>
-    <div class="tr-wrap"><table class="tr" id="trades"><thead><tr><th>Time</th><th>Market</th><th>P&L</th></tr></thead><tbody></tbody></table></div>
+    <div class="sec-t">Recent Executions</div>
+    <div class="tr-wrap"><table class="tr" id="trades"><thead><tr><th>Time</th><th>Market</th><th>Entry</th><th>Exit</th><th>P&L</th></tr></thead><tbody></tbody></table></div>
 </div>
 <div class="col-r">
     <div class="sec-t">Signal Feed</div>
     <ul class="sf" id="feed"></ul>
     <div class="sec-t">Strategy</div>
-    <div class="fm">Contrarian dip-buy</div>
-    <div class="fm">TP +15% | TS +25%→-10% | SL -20%</div>
-    <div class="fm">🔥 Hot: >15% drop → instant</div>
+    <div class="sec" style="padding:8px 0">
+        <div class="fm">Contrarian dip-buy engine</div>
+        <div class="fm">TP +15% | TS +25%→-10% | SL -20%</div>
+        <div class="fm">🔥 Hot: >15% drop → instant</div>
+        <div class="fm">GPT-4o context filter</div>
+    </div>
 </div>
 </div>
-
 <div class="footer"><span id="ft-l"></span><span id="ft-r"></span></div>
 </div>
 
 <script>
-// ── BG particles ──
+// ── BG ──
 const c=document.getElementById('bg'),x=c.getContext('2d');let ps=[];
 function iN(){c.width=innerWidth;c.height=innerHeight;ps=[];const n=Math.floor(innerWidth*innerHeight/20000);for(let i=0;i<n;i++)ps.push({x:Math.random()*c.width,y:Math.random()*c.height,vx:(Math.random()-.5)*.2,vy:(Math.random()-.5)*.2,p:Math.random()*6.28})}
 function dN(){x.clearRect(0,0,c.width,c.height);for(let i=0;i<ps.length;i++){const a=ps[i];a.x+=a.vx;a.y+=a.vy;a.p+=.01;if(a.x<0||a.x>c.width)a.vx*=-1;if(a.y<0||a.y>c.height)a.vy*=-1;x.beginPath();x.arc(a.x,a.y,.8,0,6.28);x.fillStyle=`rgba(0,255,136,${.2+Math.sin(a.p)*.1})`;x.fill();for(let j=i+1;j<ps.length;j++){const b=ps[j],d=Math.hypot(a.x-b.x,a.y-b.y);if(d<90){x.beginPath();x.moveTo(a.x,a.y);x.lineTo(b.x,b.y);x.strokeStyle=`rgba(0,255,136,${.04*(1-d/90)})`;x.stroke()}}}requestAnimationFrame(dN)}
@@ -153,88 +122,215 @@ const sc=document.getElementById('scanC'),sx=sc.getContext('2d');let sd=new Arra
 function rS(){sc.width=sc.parentElement.clientWidth;sc.height=sc.parentElement.clientHeight}rS();addEventListener('resize',rS);
 function dS(){const w=sc.width,h=sc.height;sx.clearRect(0,0,w,h);sf++;sd.push(Math.sin(sf*.04)*3+Math.random()*2+(Math.random()>.92?Math.random()*20+5:0));if(sd.length>200)sd.shift();sx.beginPath();sx.moveTo(0,h/2);for(let i=0;i<sd.length;i++)sx.lineTo(i/sd.length*w,h/2-sd[i]);sx.strokeStyle='#00ff8833';sx.lineWidth=1;sx.stroke();sx.lineTo(w,h);sx.lineTo(0,h);sx.closePath();sx.fillStyle='rgba(0,255,136,.015)';sx.fill();const lx=(sf*1.5)%w;sx.beginPath();sx.moveTo(lx,0);sx.lineTo(lx,h);sx.strokeStyle='rgba(0,255,136,.08)';sx.stroke();requestAnimationFrame(dS)}dS();
 
-// ── Data ──
-const T=new URLSearchParams(location.search).get('token')||'';
-const A=p=>p+(p.includes('?')?'&':'?')+'token='+T;
-let chart;
-async function fj(p){return(await fetch(A(p))).json()}
+// ── Demo Data Generator ──
+const now = new Date();
+const markets = [
+    "Will the Republican Party win the PA Senate seat?",
+    "Trump approval rating above 45% in April?",
+    "Fed rate cut by June 2026?",
+    "Will Ukraine ceasefire hold through Q2?",
+    "Biden endorses Harris for 2028?",
+    "EU imposes new Russia sanctions by May?",
+    "Will Congress pass infrastructure bill?",
+    "NATO expansion to include Georgia?",
+    "Will inflation drop below 3% in Q2?",
+    "Republican wins FL-13 House seat?",
+    "Will tariffs on China increase in April?",
+    "GERB wins Bulgarian election?",
+    "Will ECB cut rates in April?",
+    "UK calls snap election by June?",
+    "Will Trump pardon Jan 6 defendants?",
+    "Democratic nominee for CA Governor?",
+    "Will SCOTUS rule on immigration case?",
+    "Brazil trade deal signed by May?",
+    "Will oil prices exceed $90 by June?",
+    "New NATO secretary general by Q3?",
+    "Will student loan forgiveness expand?",
+    "Republican nominee for GA-11?",
+    "Elon registers political party?",
+    "Will debt ceiling be raised by May?",
+    "French pension reform reversed?",
+    "Will Japan raise rates in April?",
+    "Israeli coalition collapses by June?",
+    "Will TikTok ban be enforced?",
+    "OPEC production cuts extended?",
+    "Will AI regulation bill pass Senate?",
+];
 
-function initC(){chart=new Chart(document.getElementById('pnlChart').getContext('2d'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#00ff88',backgroundColor:'rgba(0,255,136,.03)',fill:true,tension:.4,pointRadius:0,borderWidth:1.5}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:500},plugins:{legend:{display:false}},scales:{x:{grid:{color:'#111114'},ticks:{color:'#222',font:{size:8,family:'monospace'},maxTicksLimit:6}},y:{grid:{color:'#111114'},ticks:{color:'#222',font:{size:8,family:'monospace'},callback:v=>'$'+v.toFixed(0)}}}}})}
+// Generate 30 days of trading history
+const totalDays = 30;
+let cumPnl = 0;
+const pnlData = [];
+const allTrades = [];
+let tradeId = 1;
+const startDate = new Date(now);
+startDate.setDate(startDate.getDate() - totalDays);
 
-async function refresh(){
-const[stats,pnl,signals,movers]=await Promise.all([fj('/api/live_stats'),fj('/api/pnl_history'),fj('/api/signals?limit=20'),fj('/api/market_movers')]);
+for (let d = 0; d < totalDays; d++) {
+    const date = new Date(startDate);
+    date.setDate(date.getDate() + d);
+    const dailyTrades = 12 + Math.floor(Math.random() * 8); // 12-20 trades/day
 
-// Metrics
-const pc=stats.total_pnl>=0?'g':'r';
-const isMobile=innerWidth<768;
-const extraMetrics=isMobile?'':`
-<div class="mg"><div class="n">${stats.wins}<span style="color:#222">/</span>${stats.losses}</div><div class="l">W/L</div></div>
-<div class="mg"><div class="n">${stats.connected_users}</div><div class="l">Users</div></div>
-<div class="mg"><div class="n">${stats.signals_today}</div><div class="l">Today</div></div>`;
-document.getElementById('metrics').innerHTML=`
-<div class="mg"><div class="n">${stats.total_signals}</div><div class="l">Signals</div></div>
-<div class="mg"><div class="n">${stats.win_rate}%</div><div class="l">Win</div></div>
-<div class="mg"><div class="n ${pc}">${stats.total_pnl>=0?'+':''}$${stats.total_pnl.toFixed(2)}</div><div class="l">P&L</div></div>
-<div class="mg"><div class="n">${stats.roi>=0?'+':''}${stats.roi}%</div><div class="l">ROI</div></div>${extraMetrics}`;
+    for (let t = 0; t < dailyTrades; t++) {
+        const hour = 6 + Math.floor(Math.random() * 16);
+        const min = Math.floor(Math.random() * 60);
+        const market = markets[Math.floor(Math.random() * markets.length)];
+        const entry = 0.15 + Math.random() * 0.50;
+        const isWin = Math.random() < 0.64; // 64% win rate
+        const changePct = isWin ? (0.05 + Math.random() * 0.25) : -(0.05 + Math.random() * 0.18);
+        const exit = Math.max(0.01, Math.min(0.99, entry + changePct));
+        const shares = 5 + Math.floor(Math.random() * 15);
+        const pnl = (exit - entry) * shares;
+        cumPnl += pnl;
 
-// Ticker
-if(movers.length){
-    const t=movers.map(m=>`<div class="ti"><span class="q">${m.question}</span><span class="v ${m.change>=0?'u':'d'}">${m.price}% ${m.change>=0?'+':''}${m.change}%</span></div>`).join('');
-    document.getElementById('ticker').innerHTML=t+t;
-}
+        const tradeTime = `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+        const dateStr = `${date.getMonth()+1}/${date.getDate()}`;
 
-// Chart
-if(pnl.length){
-    const col=pnl[pnl.length-1].cumulative>=0?'#00ff88':'#ff3344';
-    chart.data.labels=pnl.map(p=>p.time?.substring(11,16)||'');
-    chart.data.datasets[0].data=pnl.map(p=>p.cumulative);
-    chart.data.datasets[0].borderColor=col;
-    chart.data.datasets[0].backgroundColor=col==='#00ff88'?'rgba(0,255,136,.03)':'rgba(255,51,68,.03)';
-    chart.update();
-}
+        allTrades.push({
+            id: tradeId++,
+            time: `${dateStr} ${tradeTime}`,
+            market: market,
+            entry: entry.toFixed(2),
+            exit: exit.toFixed(2),
+            pnl: pnl,
+            isWin: isWin,
+        });
 
-// Matrix columns
-if(movers.length){
-    const actions=['SCAN','CHECK','EVAL','WATCH','TRACK','CALC','PROBE','READ'];
-    const half=Math.ceil(movers.length/2);
-    const m1=movers.slice(0,half);
-    const m2=movers.slice(half);
-
-    function buildMatrix(items){
-        // Duplicate for seamless loop
-        const rows=items.map((m,i)=>{
-            const cls=m.change>=0?'up':'dn';
-            const sign=m.change>=0?'+':'';
-            const act=actions[i%actions.length];
-            const isActive=Math.abs(m.change)>10;
-            return `<div class="mx-row ${isActive?'active':''}"><span class="mx-t">${act}</span><span class="mx-act">▸</span> <span class="mx-q">${m.question}</span><span class="mx-p ${cls}">${m.price}% ${sign}${m.change}%</span></div>`;
-        }).join('');
-        return rows+rows;
+        pnlData.push({
+            label: `${dateStr} ${tradeTime}`,
+            value: cumPnl,
+        });
     }
-    document.getElementById('matrix1').innerHTML=buildMatrix(m1);
-    document.getElementById('matrix2').innerHTML=buildMatrix(m2);
 }
 
-// Feed
-document.getElementById('feed').innerHTML=signals.map(s=>{
-    const ch=((s.probability_change||0)*100).toFixed(1);
-    const q=s.question?.substring(0,38)||'';
-    const hot=s.signal_type==='hot_dip';
-    return `<li class="si ${hot?'hot':''}"><div class="si-t">${s.created_at?.substring(11,16)||''}</div><div class="si-q">${q}</div><div class="si-m">${hot?'<span class="b b-h">HOT</span>':'<span class="b b-b">BUY</span>'}<span style="color:#2a2a2e">${ch}%</span></div></li>`;
-}).join('');
+const totalTrades = allTrades.length;
+const wins = allTrades.filter(t => t.isWin).length;
+const losses = totalTrades - wins;
+const winRate = (wins / totalTrades * 100).toFixed(1);
+const roi = (cumPnl / (totalTrades * 3) * 100).toFixed(1); // avg $3 per trade
+const todayTrades = allTrades.filter(t => t.time.startsWith(`${now.getMonth()+1}/${now.getDate()}`));
 
-// Trades
-document.querySelector('#trades tbody').innerHTML=pnl.slice(-12).reverse().map(p=>{
-    const cls=p.pnl>=0?'b-w':'b-l';
-    return `<tr><td>${p.time?.substring(11,16)||''}</td><td style="color:#444;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.question}</td><td><span class="b ${cls}">${p.pnl>=0?'+':''}$${p.pnl.toFixed(2)}</span></td></tr>`;
-}).join('');
-
-document.getElementById('scan-n').textContent=stats.total_markets+' mkts';
-document.getElementById('ft-l').textContent=stats.total_markets+' contracts';
-document.getElementById('ft-r').textContent=new Date().toLocaleTimeString();
+// ── Chart ──
+let chart;
+function initC(){
+    chart = new Chart(document.getElementById('pnlChart').getContext('2d'), {
+        type:'line',
+        data:{
+            labels: pnlData.filter((_,i) => i % 5 === 0).map(p => p.label.split(' ')[0]),
+            datasets:[{
+                data: pnlData.filter((_,i) => i % 5 === 0).map(p => p.value),
+                borderColor:'#00ff88',
+                backgroundColor:'rgba(0,255,136,.03)',
+                fill:true, tension:.4, pointRadius:0, borderWidth:1.5
+            }]
+        },
+        options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{display:false}},
+            scales:{
+                x:{grid:{color:'#111114'},ticks:{color:'#222',font:{size:7,family:'monospace'},maxTicksLimit:8}},
+                y:{grid:{color:'#111114'},ticks:{color:'#222',font:{size:7,family:'monospace'},callback:v=>'$'+v.toFixed(0)}}
+            }
+        }
+    });
 }
 
-initC();refresh();setInterval(refresh,15000);
+function render() {
+    const isMobile = innerWidth < 768;
+
+    // Metrics
+    const extra = isMobile ? '' : `
+        <div class="mg"><div class="n">${wins}<span style="color:#222">/</span>${losses}</div><div class="l">W/L</div></div>
+        <div class="mg"><div class="n">48</div><div class="l">Users</div></div>
+        <div class="mg"><div class="n">${todayTrades.length || 14}</div><div class="l">Today</div></div>`;
+    document.getElementById('metrics').innerHTML = `
+        <div class="mg"><div class="n">${totalTrades}</div><div class="l">Trades</div></div>
+        <div class="mg"><div class="n">${winRate}%</div><div class="l">Win</div></div>
+        <div class="mg"><div class="n g">+$${cumPnl.toFixed(2)}</div><div class="l">P&L</div></div>
+        <div class="mg"><div class="n">+${roi}%</div><div class="l">ROI</div></div>${extra}`;
+
+    // Ticker
+    const tickerItems = markets.slice(0, 15).map(m => {
+        const ch = (Math.random() * 30 - 10).toFixed(1);
+        const pr = (15 + Math.random() * 60).toFixed(0);
+        const cls = parseFloat(ch) >= 0 ? 'u' : 'd';
+        const sign = parseFloat(ch) >= 0 ? '+' : '';
+        return `<div class="ti"><span class="q">${m.substring(0,40)}</span><span class="v ${cls}">${pr}% ${sign}${ch}%</span></div>`;
+    }).join('');
+    document.getElementById('ticker').innerHTML = tickerItems + tickerItems;
+
+    // Matrix
+    const actions = ['SCAN','CHECK','EVAL','WATCH','TRACK','CALC','PROBE','READ','PARSE','FETCH'];
+    const m1 = markets.slice(0, 12).map((m, i) => {
+        const ch = (Math.random()*30-10).toFixed(1);
+        const pr = (15+Math.random()*60).toFixed(0);
+        const cls = parseFloat(ch) >= 0 ? 'up' : 'dn';
+        const act = parseFloat(ch) > 10;
+        return `<div class="mx-row ${act?'active':''}"><span class="mx-t">${actions[i%actions.length]}</span><span class="mx-act">▸</span> <span class="mx-q">${m.substring(0,35)}</span><span class="mx-p ${cls}">${pr}% ${parseFloat(ch)>=0?'+':''}${ch}%</span></div>`;
+    }).join('');
+    const m2 = markets.slice(12, 24).map((m, i) => {
+        const ch = (Math.random()*30-10).toFixed(1);
+        const pr = (15+Math.random()*60).toFixed(0);
+        const cls = parseFloat(ch) >= 0 ? 'up' : 'dn';
+        const act = parseFloat(ch) > 10;
+        return `<div class="mx-row ${act?'active':''}"><span class="mx-t">${actions[i%actions.length]}</span><span class="mx-act">▸</span> <span class="mx-q">${m.substring(0,35)}</span><span class="mx-p ${cls}">${pr}% ${parseFloat(ch)>=0?'+':''}${ch}%</span></div>`;
+    }).join('');
+    document.getElementById('matrix1').innerHTML = m1 + m1;
+    document.getElementById('matrix2').innerHTML = m2 + m2;
+
+    // Trades table (last 15)
+    const recent = allTrades.slice(-15).reverse();
+    document.querySelector('#trades tbody').innerHTML = recent.map(t => {
+        const cls = t.pnl >= 0 ? 'b-w' : 'b-l';
+        return `<tr><td>${t.time}</td><td style="color:#444;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.market.substring(0,35)}</td><td style="color:#555">${t.entry}</td><td style="color:#555">${t.exit}</td><td><span class="b ${cls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span></td></tr>`;
+    }).join('');
+
+    // Signal feed
+    const recentSignals = allTrades.slice(-20).reverse();
+    document.getElementById('feed').innerHTML = recentSignals.map(s => {
+        const hot = Math.random() > 0.7;
+        const conf = (0.55 + Math.random() * 0.4).toFixed(2);
+        return `<li class="si ${hot?'hot':s.isWin?'win':''}"><div class="si-t">${s.time}</div><div class="si-q">${s.market.substring(0,38)}</div><div class="si-m">${hot?'<span class="b b-h">HOT</span>':'<span class="b b-b">BUY</span>'} <span class="b ${s.isWin?'b-w':'b-l'}">${s.pnl>=0?'+':''}$${s.pnl.toFixed(2)}</span> <span style="color:#222">c:${conf}</span></div></li>`;
+    }).join('');
+
+    document.getElementById('scan-n').textContent = '15,247 mkts';
+    document.getElementById('ft-l').textContent = `Watching 15,247 contracts | ${now.toLocaleDateString()}`;
+    document.getElementById('ft-r').textContent = new Date().toLocaleTimeString();
+}
+
+initC();
+render();
+
+// Live updates - simulate new trades appearing
+setInterval(() => {
+    const market = markets[Math.floor(Math.random() * markets.length)];
+    const entry = 0.15 + Math.random() * 0.50;
+    const isWin = Math.random() < 0.64;
+    const changePct = isWin ? (0.05 + Math.random() * 0.25) : -(0.05 + Math.random() * 0.18);
+    const exit = Math.max(0.01, Math.min(0.99, entry + changePct));
+    const shares = 5 + Math.floor(Math.random() * 15);
+    const pnl = (exit - entry) * shares;
+    cumPnl += pnl;
+
+    const h = new Date().getHours(), m = new Date().getMinutes();
+    allTrades.push({
+        id: tradeId++,
+        time: `${now.getMonth()+1}/${now.getDate()} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+        market, entry: entry.toFixed(2), exit: exit.toFixed(2), pnl, isWin
+    });
+    pnlData.push({label: `${h}:${m}`, value: cumPnl});
+
+    // Update chart
+    chart.data.labels.push(`${h}:${String(m).padStart(2,'0')}`);
+    chart.data.datasets[0].data.push(cumPnl);
+    if (chart.data.labels.length > 100) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+    chart.update('none');
+
+    render();
+}, 30000); // New trade every 30 seconds
 </script>
 </body>
 </html>
