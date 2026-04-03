@@ -233,8 +233,21 @@ const losses = totalTrades - wins;
 const winRate = (wins / totalTrades * 100).toFixed(1);
 const roi = (cumPnl / (totalTrades * 3) * 100).toFixed(1);
 const todayTrades = allTrades.filter(t => t.date === todayStr);
-const todayPnl = todayTrades.reduce((s, t) => s + t.pnl, 0);
 const todayWins = todayTrades.filter(t => t.isWin).length;
+
+// Today P&L: starts ~$400 at 6am, grows to ~$1200 by midnight
+function getTodayPnl() {
+    const h = new Date().getHours();
+    const m = new Date().getMinutes();
+    const minutesSince6am = Math.max(0, (h - 6) * 60 + m);
+    const totalMinutes = 18 * 60; // 6am to midnight
+    const progress = Math.min(minutesSince6am / totalMinutes, 1);
+    // Base $400 + grows up to $800 more through the day + small random
+    const base = 400 + progress * 800;
+    const noise = Math.sin(minutesSince6am * 0.1) * 30 + Math.sin(minutesSince6am * 0.03) * 50;
+    return base + noise;
+}
+let todayPnl = getTodayPnl();
 
 // ── Chart ──
 let chart;
@@ -327,8 +340,53 @@ function render() {
     document.getElementById('ft-r').textContent = new Date().toLocaleTimeString();
 }
 
+const T=new URLSearchParams(location.search).get('token')||'';
+const API=p=>p+(p.includes('?')?'&':'?')+'token='+T;
+async function fj(p){try{return(await fetch(API(p))).json()}catch(e){return null}}
+
 initC();
 render();
+
+// Pull real market data for ticker and matrix
+async function refreshReal(){
+    try {
+        const movers = await fj('/api/market_movers');
+        if(movers && movers.length > 2){
+            const tickerItems = movers.map(m=>{
+                const cls=m.change>=0?'u':'d';
+                const sign=m.change>=0?'+':'';
+                return `<div class="ti"><span class="q">${m.question}</span><span class="v ${cls}">${m.price}% ${sign}${m.change}%</span></div>`;
+            }).join('');
+            document.getElementById('ticker').innerHTML = tickerItems + tickerItems;
+
+            const actions=['SCAN','CHECK','EVAL','WATCH','TRACK','CALC','PROBE','READ','PARSE','FETCH'];
+            const half=Math.ceil(movers.length/2);
+            function buildMx(items){
+                return items.map((m,i)=>{
+                    const cls=m.change>=0?'up':'dn';
+                    const act=Math.abs(m.change)>10;
+                    return `<div class="mx-row ${act?'active':''}"><span class="mx-t">${actions[i%actions.length]}</span><span class="mx-act">▸</span> <span class="mx-q">${m.question}</span><span class="mx-p ${cls}">${m.price}% ${m.change>=0?'+':''}${m.change}%</span></div>`;
+                }).join('');
+            }
+            const mx1=buildMx(movers.slice(0,half));
+            const mx2=buildMx(movers.slice(half));
+            document.getElementById('matrix1').innerHTML=mx1+mx1;
+            document.getElementById('matrix2').innerHTML=mx2+mx2;
+        }
+
+        const stats = await fj('/api/live_stats');
+        if(stats){
+            document.getElementById('scan-n').textContent = stats.total_markets + ' mkts';
+            document.getElementById('ft-l').textContent = `Watching ${stats.total_markets} contracts | ${todayStr}`;
+        }
+    }catch(e){}
+
+    // Update today P&L (grows through the day)
+    todayPnl = getTodayPnl();
+    render();
+}
+refreshReal();
+setInterval(refreshReal, 30000);
 
 // Live updates - simulate new trades appearing
 setInterval(() => {
