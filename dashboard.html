@@ -157,38 +157,60 @@ const markets = [
     "Will AI regulation bill pass Senate?",
 ];
 
-// Generate 30 days of trading history
+// Helper: format date as DD.MM.YYYY
+function fmtDate(d) {
+    return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+}
+function fmtDateShort(d) {
+    return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Generate 30 days of trading history ending TODAY
 const totalDays = 30;
 let cumPnl = 0;
 const pnlData = [];
+const dailyPnl = {};
 const allTrades = [];
 let tradeId = 1;
-const startDate = new Date(now);
-startDate.setDate(startDate.getDate() - totalDays);
+
+// Seed random for consistency per day
+function seededRand(seed) {
+    let s = seed;
+    return function() { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; };
+}
 
 for (let d = 0; d < totalDays; d++) {
-    const date = new Date(startDate);
-    date.setDate(date.getDate() + d);
-    const dailyTrades = 12 + Math.floor(Math.random() * 8); // 12-20 trades/day
+    const date = new Date(now);
+    date.setDate(date.getDate() - (totalDays - 1 - d));
+    date.setHours(0,0,0,0);
+    const dateKey = fmtDate(date);
+    const dateShort = fmtDateShort(date);
+    const rng = seededRand(date.getTime() / 86400000 | 0);
+
+    const dailyTrades = 12 + Math.floor(rng() * 8); // 12-20 trades/day
+    let dayPnl = 0;
 
     for (let t = 0; t < dailyTrades; t++) {
-        const hour = 6 + Math.floor(Math.random() * 16);
-        const min = Math.floor(Math.random() * 60);
-        const market = markets[Math.floor(Math.random() * markets.length)];
-        const entry = 0.15 + Math.random() * 0.50;
-        const isWin = Math.random() < 0.64; // 64% win rate
-        const changePct = isWin ? (0.05 + Math.random() * 0.25) : -(0.05 + Math.random() * 0.18);
+        const hour = 6 + Math.floor(rng() * 16);
+        const min = Math.floor(rng() * 60);
+        const market = markets[Math.floor(rng() * markets.length)];
+        const entry = 0.15 + rng() * 0.50;
+        const isWin = rng() < 0.64;
+        const changePct = isWin ? (0.05 + rng() * 0.25) : -(0.05 + rng() * 0.18);
         const exit = Math.max(0.01, Math.min(0.99, entry + changePct));
-        const shares = 5 + Math.floor(Math.random() * 15);
+        const shares = 5 + Math.floor(rng() * 15);
         const pnl = (exit - entry) * shares;
         cumPnl += pnl;
+        dayPnl += pnl;
 
         const tradeTime = `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
-        const dateStr = `${date.getMonth()+1}/${date.getDate()}`;
 
         allTrades.push({
             id: tradeId++,
-            time: `${dateStr} ${tradeTime}`,
+            date: dateKey,
+            dateShort: dateShort,
+            time: `${dateShort} ${tradeTime}`,
+            sortTime: `${String(hour).padStart(2,'0')}${String(min).padStart(2,'0')}`,
             market: market,
             entry: entry.toFixed(2),
             exit: exit.toFixed(2),
@@ -196,19 +218,20 @@ for (let d = 0; d < totalDays; d++) {
             isWin: isWin,
         });
 
-        pnlData.push({
-            label: `${dateStr} ${tradeTime}`,
-            value: cumPnl,
-        });
+        pnlData.push({ label: `${dateShort} ${tradeTime}`, value: cumPnl });
     }
+    dailyPnl[dateKey] = dayPnl;
 }
 
+const todayStr = fmtDate(now);
 const totalTrades = allTrades.length;
 const wins = allTrades.filter(t => t.isWin).length;
 const losses = totalTrades - wins;
 const winRate = (wins / totalTrades * 100).toFixed(1);
-const roi = (cumPnl / (totalTrades * 3) * 100).toFixed(1); // avg $3 per trade
-const todayTrades = allTrades.filter(t => t.time.startsWith(`${now.getMonth()+1}/${now.getDate()}`));
+const roi = (cumPnl / (totalTrades * 3) * 100).toFixed(1);
+const todayTrades = allTrades.filter(t => t.date === todayStr);
+const todayPnl = todayTrades.reduce((s, t) => s + t.pnl, 0);
+const todayWins = todayTrades.filter(t => t.isWin).length;
 
 // ── Chart ──
 let chart;
@@ -239,14 +262,16 @@ function render() {
     const isMobile = innerWidth < 768;
 
     // Metrics
+    const tpc = todayPnl >= 0 ? 'g' : 'r';
+    const tps = todayPnl >= 0 ? '+' : '';
     const extra = isMobile ? '' : `
         <div class="mg"><div class="n">${wins}<span style="color:#222">/</span>${losses}</div><div class="l">W/L</div></div>
-        <div class="mg"><div class="n">48</div><div class="l">Users</div></div>
-        <div class="mg"><div class="n">${todayTrades.length || 14}</div><div class="l">Today</div></div>`;
+        <div class="mg"><div class="n ${tpc}">${tps}$${todayPnl.toFixed(2)}</div><div class="l">Today P&L</div></div>
+        <div class="mg"><div class="n">${todayTrades.length}/${totalTrades}</div><div class="l">${todayStr}</div></div>`;
     document.getElementById('metrics').innerHTML = `
-        <div class="mg"><div class="n">${totalTrades}</div><div class="l">Trades</div></div>
-        <div class="mg"><div class="n">${winRate}%</div><div class="l">Win</div></div>
-        <div class="mg"><div class="n g">+$${cumPnl.toFixed(2)}</div><div class="l">P&L</div></div>
+        <div class="mg"><div class="n">${totalTrades}</div><div class="l">Trades (30d)</div></div>
+        <div class="mg"><div class="n">${winRate}%</div><div class="l">Win Rate</div></div>
+        <div class="mg"><div class="n g">+$${cumPnl.toFixed(2)}</div><div class="l">Total P&L</div></div>
         <div class="mg"><div class="n">+${roi}%</div><div class="l">ROI</div></div>${extra}`;
 
     // Ticker
@@ -294,7 +319,7 @@ function render() {
     }).join('');
 
     document.getElementById('scan-n').textContent = '15,247 mkts';
-    document.getElementById('ft-l').textContent = `Watching 15,247 contracts | ${now.toLocaleDateString()}`;
+    document.getElementById('ft-l').textContent = `Watching 15,247 contracts | ${todayStr}`;
     document.getElementById('ft-r').textContent = new Date().toLocaleTimeString();
 }
 
@@ -313,12 +338,16 @@ setInterval(() => {
     cumPnl += pnl;
 
     const h = new Date().getHours(), m = new Date().getMinutes();
+    const ds = fmtDateShort(now);
     allTrades.push({
         id: tradeId++,
-        time: `${now.getMonth()+1}/${now.getDate()} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+        date: todayStr,
+        dateShort: ds,
+        time: `${ds} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
         market, entry: entry.toFixed(2), exit: exit.toFixed(2), pnl, isWin
     });
-    pnlData.push({label: `${h}:${m}`, value: cumPnl});
+    todayTrades.push(allTrades[allTrades.length-1]);
+    pnlData.push({label: `${ds} ${h}:${String(m).padStart(2,'0')}`, value: cumPnl});
 
     // Update chart
     chart.data.labels.push(`${h}:${String(m).padStart(2,'0')}`);
